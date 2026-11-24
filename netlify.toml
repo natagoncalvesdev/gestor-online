@@ -1,0 +1,15 @@
+# Site na Netlify. O plugin executa o runtime do Next.js.
+# Variáveis (painel da Netlify ou .env.local):
+# NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+# NEXT_PUBLIC_SITE_URL (URL pública https, usada no retorno e no webhook)
+# NEXT_PUBLIC_BUNNY_LIBRARY_ID (padrão 494330)
+# MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_WEBHOOK_SECRET
+
+[build]
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
