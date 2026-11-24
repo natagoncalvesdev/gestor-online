@@ -40,12 +40,12 @@ export function LiberarAcesso({
       </label>
       <ActionForm action={matricularCurso} className="space-y-3">
         <input type="hidden" name="aluno_id" value={alunoId} />
-        <input type="hidden" name="curso_id" value={cursoId} />
-        <SubmitButton>Matricular no curso</SubmitButton>
+        <input type="hidden" name="produto_id" value={cursoId} />
+        <SubmitButton>Matricular</SubmitButton>
       </ActionForm>
       <ActionForm action={liberarMateria} className="space-y-3">
         <input type="hidden" name="aluno_id" value={alunoId} />
-        <input type="hidden" name="curso_id" value={cursoId} />
+        <input type="hidden" name="produto_id" value={cursoId} />
         <label className="block space-y-1 text-sm">
           <span className="font-medium">Matéria</span>
           <Select name="materia_id" value={materiaId} onChange={(event) => setMateriaId(event.target.value)}>

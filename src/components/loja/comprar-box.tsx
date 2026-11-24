@@ -11,7 +11,7 @@ export type ItemCarrinho = {
   variacaoId: string | null;
   nome: string;
   preco: number;
-  cursoNome: string | null;
+  inclui: string;
 };
 
 const CHAVE = "gestor-online-carrinho";
@@ -34,13 +34,15 @@ export function ComprarBox({
   produtoId,
   nome,
   preco,
-  cursoNome,
+  precoDe = null,
+  inclui,
   variacoes,
 }: {
   produtoId: string;
   nome: string;
   preco: number;
-  cursoNome: string | null;
+  precoDe?: number | null;
+  inclui: string;
   variacoes: { id: string; nome: string; preco: number }[];
 }) {
   const [variacaoId, setVariacaoId] = useState(variacoes[0]?.id ?? "");
@@ -55,7 +57,7 @@ export function ComprarBox({
       variacaoId: escolhida?.id ?? null,
       nome: escolhida ? `${nome} — ${escolhida.nome}` : nome,
       preco: escolhida ? escolhida.preco : preco,
-      cursoNome,
+      inclui,
     });
     gravarCarrinho(atual);
     toast.success("Produto adicionado ao carrinho.");
@@ -63,7 +65,10 @@ export function ComprarBox({
 
   return (
     <div className="space-y-3 rounded-xl border bg-card p-4">
-      <p className="text-2xl font-semibold">{formatBRL(escolhida?.preco ?? preco)}</p>
+      <p className="text-2xl font-semibold">
+        {formatBRL(escolhida?.preco ?? preco)}
+        {!escolhida && precoDe != null ? <span className="ml-2 text-base font-normal text-muted-foreground line-through">{formatBRL(precoDe)}</span> : null}
+      </p>
       {variacoes.length > 0 ? (
         <label className="block space-y-1 text-sm">
           <span className="font-medium">Opção</span>
@@ -77,7 +82,7 @@ export function ComprarBox({
         </label>
       ) : null}
       <p className="text-sm text-muted-foreground">
-        {cursoNome ? `Inclui o curso ${cursoNome}.` : "Este produto não libera curso."}
+        {inclui}
       </p>
       <Button type="button" variant="accent" onClick={adicionar}>
         Adicionar ao carrinho

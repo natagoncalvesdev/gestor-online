@@ -17,17 +17,17 @@ export default async function PedidosSecretariaPage() {
   const supabase = await createClient();
   const { data } = await supabase
     .from("pedido")
-    .select("id, status, valor_total, data_criacao, aluno:aluno_id(nome), itens:pedido_item(nome, curso_id)")
+    .select("id, status, valor_total, data_criacao, aluno:aluno_id(nome), itens:pedido_item(nome)")
     .order("data_criacao", { ascending: false })
     .limit(100);
 
   return (
     <div>
-      <PageTitle title="Pedidos" description="Itens sem curso não geram matrícula." />
+      <PageTitle title="Pedidos" description="A matrícula só é criada quando o produto tem matérias." />
       <ul className="space-y-3">
         {(data ?? []).map((pedido) => {
           const aluno = um(pedido.aluno as { nome: string } | { nome: string }[] | null);
-          const itens = (pedido.itens ?? []) as { nome: string; curso_id: string | null }[];
+          const itens = (pedido.itens ?? []) as { nome: string }[];
           return (
             <li key={pedido.id} className="rounded-xl border bg-card p-4">
               <div className="flex items-start justify-between gap-3">
@@ -43,7 +43,6 @@ export default async function PedidosSecretariaPage() {
                 {itens.map((item, indice) => (
                   <li key={`${item.nome}-${indice}`}>
                     {item.nome}
-                    {item.curso_id ? "" : " · sem curso"}
                   </li>
                 ))}
               </ul>

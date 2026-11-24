@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/session";
@@ -9,6 +10,7 @@ import type { FormState } from "@/lib/form-state";
 
 function dbMessage(error: { code?: string; message: string }) {
   if (error.code === "23505") return "Já existe um registro com estes dados.";
+  if (error.code === "23503") return "Este produto já tem matrícula e não pode ser excluído.";
   return error.message;
 }
 
@@ -41,9 +43,14 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
     ativo,
   };
 
+  let ordem = 1;
+  if (!id) {
+    const { data: ultima } = await supabase.from("materia").select("ordem").order("ordem", { ascending: false }).limit(1).maybeSingle();
+    ordem = Number(ultima?.ordem ?? 0) + 1;
+  }
   const { error } = id
     ? await supabase.from("materia").update(payload).eq("id", id)
-    : await supabase.from("materia").insert(payload);
+    : await supabase.from("materia").insert({ ...payload, ordem });
 
   if (error) return { error: dbMessage(error) };
   revalidatePath("/secretaria/materias");
@@ -181,66 +188,82 @@ export async function excluirQuestao(_prev: FormState, formData: FormData): Prom
   return { ok: "Questão excluída." };
 }
 
-export async function salvarCurso(_prev: FormState, formData: FormData): Promise<FormState> {
+export async function adicionarMateriaProduto(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireAdmin();
   const supabase = await createClient();
-  const id = String(formData.get("id") ?? "");
-  const nome = String(formData.get("nome") ?? "").trim();
-  const slugInformado = String(formData.get("slug") ?? "").trim();
-  const descricao = String(formData.get("descricao") ?? "").trim();
-  const limite = Number(formData.get("materias_simultaneas") ?? 1);
-  const ativo = formData.get("ativo") === "on";
-
-  if (!nome) return { error: "Informe o nome do curso." };
-  if (![1, 2, 3].includes(limite)) return { error: "Escolha 1, 2 ou 3 matérias ao mesmo tempo." };
-
-  const payload = {
-    nome,
-    slug: slugify(slugInformado || nome),
-    descricao,
-    materias_simultaneas: limite,
-    ativo,
-  };
-  if (!payload.slug) return { error: "Não foi possível gerar o identificador do curso." };
-
-  const { error } = id
-    ? await supabase.from("curso").update(payload).eq("id", id)
-    : await supabase.from("curso").insert(payload);
-  if (error) return { error: dbMessage(error) };
-  revalidatePath("/secretaria/cursos");
-  return { ok: id ? "Curso atualizado." : "Curso criado." };
-}
-
-export async function adicionarMateriaCurso(_prev: FormState, formData: FormData): Promise<FormState> {
-  await requireAdmin();
-  const supabase = await createClient();
-  const cursoId = String(formData.get("curso_id") ?? "");
+  const produtoId = String(formData.get("produto_id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
   const ordem = Number(formData.get("ordem") ?? 1);
   if (!materiaId) return { error: "Escolha a matéria." };
-  const { error } = await supabase.from("curso_materia").insert({
-    curso_id: cursoId,
+  const { error } = await supabase.from("produto_materia").insert({
+    produto_id: produtoId,
     materia_id: materiaId,
     ordem,
   });
   if (error) return { error: dbMessage(error) };
-  revalidatePath(`/secretaria/cursos/${cursoId}`);
-  return { ok: "Matéria vinculada ao curso." };
+  revalidatePath(`/secretaria/produtos/${produtoId}`);
+  return { ok: "Matéria vinculada ao produto." };
 }
 
-export async function removerMateriaCurso(_prev: FormState, formData: FormData): Promise<FormState> {
+export async function reordenarMateriasProduto(produtoId: string, materiaIds: string[]): Promise<{ ok: true } | { error: string }> {
   await requireAdmin();
   const supabase = await createClient();
-  const cursoId = String(formData.get("curso_id") ?? "");
+  for (let indice = 0; indice < materiaIds.length; indice += 1) {
+    const { error } = await supabase
+      .from("produto_materia")
+      .update({ ordem: 10000 + indice })
+      .eq("produto_id", produtoId)
+      .eq("materia_id", materiaIds[indice]);
+    if (error) return { error: dbMessage(error) };
+  }
+  for (let indice = 0; indice < materiaIds.length; indice += 1) {
+    const { error } = await supabase
+      .from("produto_materia")
+      .update({ ordem: indice + 1 })
+      .eq("produto_id", produtoId)
+      .eq("materia_id", materiaIds[indice]);
+    if (error) return { error: dbMessage(error) };
+  }
+  revalidatePath(`/secretaria/produtos/${produtoId}`);
+  return { ok: true };
+}
+
+export async function reordenarMaterias(materiaIds: string[]): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+  for (let indice = 0; indice < materiaIds.length; indice += 1) {
+    const { error } = await supabase.from("materia").update({ ordem: indice + 1 }).eq("id", materiaIds[indice]);
+    if (error) return { error: dbMessage(error) };
+  }
+  revalidatePath("/secretaria/materias");
+  return { ok: true };
+}
+
+export async function reordenarProdutos(produtoIds: string[]): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+  for (let indice = 0; indice < produtoIds.length; indice += 1) {
+    const { error } = await supabase.from("produto").update({ ordem: indice + 1 }).eq("id", produtoIds[indice]);
+    if (error) return { error: dbMessage(error) };
+  }
+  revalidatePath("/secretaria/produtos");
+  revalidatePath("/loja");
+  return { ok: true };
+}
+
+export async function removerMateriaProduto(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const produtoId = String(formData.get("produto_id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
   const { error } = await supabase
-    .from("curso_materia")
+    .from("produto_materia")
     .delete()
-    .eq("curso_id", cursoId)
+    .eq("produto_id", produtoId)
     .eq("materia_id", materiaId);
   if (error) return { error: dbMessage(error) };
-  revalidatePath(`/secretaria/cursos/${cursoId}`);
-  return { ok: "Matéria removida do curso." };
+  revalidatePath(`/secretaria/produtos/${produtoId}`);
+  return { ok: "Matéria removida do produto." };
 }
 
 export async function salvarProduto(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -251,29 +274,72 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
   const slugInformado = String(formData.get("slug") ?? "").trim();
   const descricao = String(formData.get("descricao") ?? "").trim();
   const preco = Number(formData.get("preco") ?? 0);
-  const cursoId = String(formData.get("curso_id") ?? "");
+  const promocionalInformado = String(formData.get("preco_promocional") ?? "").trim();
+  const promocaoAte = String(formData.get("promocao_ate") ?? "").trim();
+  const pesoGramas = Number(formData.get("peso_gramas") ?? 0);
+  const comprimento = Number(formData.get("comprimento_cm") ?? 0);
+  const largura = Number(formData.get("largura_cm") ?? 0);
+  const altura = Number(formData.get("altura_cm") ?? 0);
+  const limite = Number(formData.get("materias_simultaneas") ?? 1);
   const ativo = formData.get("ativo") === "on";
+  const precoPromocional = promocionalInformado === "" ? null : Number(promocionalInformado);
 
   if (!nome) return { error: "Informe o nome do produto." };
   if (!Number.isFinite(preco) || preco < 0) return { error: "Informe um preço válido." };
+  if (precoPromocional != null && (!Number.isFinite(precoPromocional) || precoPromocional < 0)) {
+    return { error: "Informe um preço promocional válido." };
+  }
+  if (promocaoAte && precoPromocional == null) return { error: "Informe o preço promocional para usar a data." };
+  if (!Number.isInteger(pesoGramas) || pesoGramas < 0) return { error: "Informe o peso em gramas, sem casas decimais." };
+  if (![comprimento, largura, altura].every((valor) => Number.isInteger(valor) && valor >= 0)) {
+    return { error: "Informe as medidas em centímetros, sem casas decimais." };
+  }
+  if (![1, 2, 3].includes(limite)) return { error: "Escolha 1, 2 ou 3 matérias ao mesmo tempo." };
 
   const payload = {
     nome,
     slug: slugify(slugInformado || nome),
     descricao,
     preco,
-    curso_id: cursoId || null,
+    preco_promocional: precoPromocional,
+    promocao_ate: precoPromocional == null ? null : promocaoAte || null,
+    peso_gramas: pesoGramas,
+    comprimento_cm: comprimento,
+    largura_cm: largura,
+    altura_cm: altura,
+    materias_simultaneas: limite,
     ativo,
   };
   if (!payload.slug) return { error: "Não foi possível gerar o endereço do produto." };
 
+  let ordem = 1;
+  if (!id) {
+    const { data: ultimo } = await supabase.from("produto").select("ordem").order("ordem", { ascending: false }).limit(1).maybeSingle();
+    ordem = Number(ultimo?.ordem ?? 0) + 1;
+  }
   const { error } = id
     ? await supabase.from("produto").update(payload).eq("id", id)
-    : await supabase.from("produto").insert(payload);
+    : await supabase.from("produto").insert({ ...payload, ordem });
   if (error) return { error: dbMessage(error) };
   revalidatePath("/secretaria/produtos");
   revalidatePath("/loja");
   return { ok: id ? "Produto atualizado." : "Produto criado." };
+}
+
+export async function excluirProduto(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
+  const confirmacao = String(formData.get("confirmacao") ?? "").trim();
+  const { data: produto } = await supabase.from("produto").select("nome").eq("id", id).maybeSingle();
+  if (!produto) return { error: "Produto não encontrado." };
+  if (confirmacao !== String(produto.nome).trim()) return { error: "Digite o nome do produto exatamente como está cadastrado." };
+
+  const { error } = await supabase.from("produto").delete().eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  revalidatePath("/secretaria/produtos");
+  revalidatePath("/loja");
+  redirect("/secretaria/produtos");
 }
 
 export async function salvarVariacao(_prev: FormState, formData: FormData): Promise<FormState> {

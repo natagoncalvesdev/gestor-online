@@ -11,6 +11,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "CETADEB Online",
   description: "Cursos de teologia, loja e área do aluno do CETADEB.",
+  icons: { icon: "/logo-online.png" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

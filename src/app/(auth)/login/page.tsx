@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { login } from "@/actions/auth";
+import { Logo } from "@/components/brand/logo";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/submit-button";
 import { Field, Input } from "@/components/ui/field";
@@ -7,9 +8,9 @@ import { Field, Input } from "@/components/ui/field";
 export default function LoginPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
-      <Link href="/" className="mb-6 text-lg font-semibold text-primary">
-        CETADEB Online
-      </Link>
+      <div className="mb-6">
+        <Logo size={72} />
+      </div>
       <h1 className="text-2xl font-semibold">Entrar</h1>
       <p className="mt-1 mb-6 text-sm text-muted-foreground">
         Aluno, secretaria ou administrador usam o mesmo acesso. O destino muda conforme a conta.

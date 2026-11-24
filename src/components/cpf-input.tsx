@@ -8,10 +8,12 @@ export function CpfInput({
   name = "cpf",
   defaultValue = "",
   required = true,
+  className,
 }: {
   name?: string;
   defaultValue?: string;
   required?: boolean;
+  className?: string;
 }) {
   const [value, setValue] = useState(formatCpfDisplay(defaultValue));
   return (
@@ -24,6 +26,7 @@ export function CpfInput({
       placeholder="000.000.000-00"
       value={value}
       onChange={(event) => setValue(formatCpfDisplay(cpfOnlyDigits(event.target.value)))}
+      className={className}
     />
   );
 }

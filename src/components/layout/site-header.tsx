@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Logo } from "@/components/brand/logo";
 import { getSession } from "@/lib/session";
 
 export async function SiteHeader() {
@@ -6,9 +7,7 @@ export async function SiteHeader() {
   return (
     <header className="border-b bg-white">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
-        <Link href="/" className="text-lg font-semibold text-primary">
-          CETADEB Online
-        </Link>
+        <Logo />
         <nav className="flex items-center gap-3 text-sm">
           <Link href="/loja">Loja</Link>
           {session?.type === "aluno" ? <Link href="/meus-cursos">Meus cursos</Link> : null}

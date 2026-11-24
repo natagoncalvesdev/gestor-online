@@ -4,7 +4,6 @@ import { isSupabaseConfigured } from "@/lib/site";
 
 const ADMIN_PREFIXES = [
   "/secretaria/materias",
-  "/secretaria/cursos",
   "/secretaria/produtos",
   "/secretaria/usuarios-internos",
 ];

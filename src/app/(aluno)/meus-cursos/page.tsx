@@ -15,7 +15,7 @@ export default async function MeusCursosPage() {
   const supabase = await createClient();
   const { data } = await supabase
     .from("matricula")
-    .select("id, status, curso:curso_id(nome, materias_simultaneas), materias:matricula_materia(ordem, status, materia:materia_id(id, nome))")
+    .select("id, status, produto:produto_id(nome, materias_simultaneas), materias:matricula_materia(ordem, status, materia:materia_id(id, nome))")
     .eq("aluno_id", session.user.id)
     .order("data_criacao", { ascending: false });
 
@@ -25,16 +25,16 @@ export default async function MeusCursosPage() {
     <div>
       <PageTitle
         title="Meus cursos"
-        description="Você estuda as matérias liberadas. A prova aprovada abre a próxima, dentro do limite do curso."
+        description="Você estuda as matérias liberadas. A prova aprovada abre a próxima, dentro do limite do produto."
       />
       {matriculas.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Nenhum curso liberado ainda. <Link href="/loja">Ver a loja</Link>.
+          Nenhum estudo liberado ainda. <Link href="/loja">Ver a loja</Link>.
         </p>
       ) : (
         <div className="space-y-6">
           {matriculas.map((matricula) => {
-            const curso = um(matricula.curso as { nome: string; materias_simultaneas: number } | { nome: string; materias_simultaneas: number }[] | null);
+            const produto = um(matricula.produto as { nome: string; materias_simultaneas: number } | { nome: string; materias_simultaneas: number }[] | null);
             const materias = lista(matricula.materias as {
               ordem: number;
               status: keyof typeof ROTULO;
@@ -42,9 +42,9 @@ export default async function MeusCursosPage() {
             }[]).sort((a, b) => a.ordem - b.ordem);
             return (
               <section key={matricula.id} className="rounded-xl border bg-card p-5">
-                <h2 className="text-lg font-semibold">{curso?.nome ?? "Curso"}</h2>
+                <h2 className="text-lg font-semibold">{produto?.nome ?? "Produto"}</h2>
                 <p className="text-sm text-muted-foreground">
-                  Até {curso?.materias_simultaneas ?? 1} {(curso?.materias_simultaneas ?? 1) === 1 ? "matéria aberta" : "matérias abertas"} ao mesmo tempo.
+                  Até {produto?.materias_simultaneas ?? 1} {(produto?.materias_simultaneas ?? 1) === 1 ? "matéria aberta" : "matérias abertas"} ao mesmo tempo.
                 </p>
                 <ul className="mt-4 divide-y">
                   {materias.map((linha) => {

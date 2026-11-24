@@ -39,14 +39,14 @@ export async function processarPagamentoMercadoPago(paymentId: string) {
 
     const { data: itens } = await admin
       .from("pedido_item")
-      .select("curso_id")
+      .select("produto_id")
       .eq("pedido_id", pedidoId);
 
     for (const item of itens ?? []) {
-      if (!item.curso_id) continue;
+      if (!item.produto_id) continue;
       await admin.rpc("criar_matricula", {
         p_aluno_id: pedido.aluno_id,
-        p_curso_id: item.curso_id,
+        p_produto_id: item.produto_id,
         p_origem: "compra",
         p_pedido_id: pedidoId,
       });

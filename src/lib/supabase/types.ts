@@ -25,6 +25,8 @@ export type Aluno = {
   bairro: string;
   cidade: string;
   uf: string;
+  atendente: string;
+  indicador: string;
   status: "ativo" | "inativo";
   data_cadastro: string;
 };

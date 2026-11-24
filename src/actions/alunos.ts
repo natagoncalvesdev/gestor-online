@@ -43,6 +43,8 @@ export async function atualizarAluno(_prev: FormState, formData: FormData): Prom
       bairro: String(formData.get("bairro") ?? "").trim(),
       cidade: String(formData.get("cidade") ?? "").trim(),
       uf: String(formData.get("uf") ?? ""),
+      atendente: String(formData.get("atendente") ?? "").trim(),
+      indicador: String(formData.get("indicador") ?? "").trim(),
       status: status === "inativo" ? "inativo" : "ativo",
     })
     .eq("id", id);
@@ -78,12 +80,12 @@ export async function matricularCurso(_prev: FormState, formData: FormData): Pro
   await requireInterno();
   const supabase = await createClient();
   const alunoId = String(formData.get("aluno_id") ?? "");
-  const cursoId = String(formData.get("curso_id") ?? "");
-  if (!cursoId) return { error: "Escolha o curso." };
+  const produtoId = String(formData.get("produto_id") ?? "");
+  if (!produtoId) return { error: "Escolha o produto." };
 
   const { data, error } = await supabase.rpc("criar_matricula", {
     p_aluno_id: alunoId,
-    p_curso_id: cursoId,
+    p_produto_id: produtoId,
     p_origem: "manual",
     p_pedido_id: null,
   });
@@ -92,20 +94,20 @@ export async function matricularCurso(_prev: FormState, formData: FormData): Pro
   const criada = Boolean((data as { criada?: boolean } | null)?.criada);
   return criada
     ? { ok: "Aluno matriculado. As primeiras matérias foram liberadas." }
-    : { error: "O aluno já está matriculado neste curso." };
+    : { error: "O aluno já está matriculado neste produto." };
 }
 
 export async function liberarMateria(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireInterno();
   const supabase = await createClient();
   const alunoId = String(formData.get("aluno_id") ?? "");
-  const cursoId = String(formData.get("curso_id") ?? "");
+  const produtoId = String(formData.get("produto_id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
-  if (!cursoId || !materiaId) return { error: "Escolha o curso e a matéria." };
+  if (!produtoId || !materiaId) return { error: "Escolha o produto e a matéria." };
 
   const { data, error } = await supabase.rpc("liberar_materia", {
     p_aluno_id: alunoId,
-    p_curso_id: cursoId,
+    p_produto_id: produtoId,
     p_materia_id: materiaId,
   });
   if (error) return { error: error.message };
@@ -174,4 +176,32 @@ export async function excluirDocumento(_prev: FormState, formData: FormData): Pr
   }
   revalidatePath(`/secretaria/alunos/${alunoId}`);
   return { ok: "Documento excluído." };
+}
+
+export async function salvarObservacao(_prev: FormState, formData: FormData): Promise<FormState> {
+  const session = await requireInterno();
+  const alunoId = String(formData.get("aluno_id") ?? "");
+  const texto = String(formData.get("texto") ?? "").trim();
+  if (!texto) return { error: "Escreva a observação." };
+  const supabase = await createClient();
+  const { error } = await supabase.from("observacao_aluno").insert({
+    aluno_id: alunoId,
+    texto,
+    autor_nome: session.user.nome,
+  });
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/alunos/${alunoId}`);
+  return { ok: "Observação adicionada." };
+}
+
+export async function destacarObservacao(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireInterno();
+  const id = String(formData.get("id") ?? "");
+  const alunoId = String(formData.get("aluno_id") ?? "");
+  const destaque = String(formData.get("destaque") ?? "") === "1";
+  const supabase = await createClient();
+  const { error } = await supabase.from("observacao_aluno").update({ destaque: !destaque }).eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/alunos/${alunoId}`);
+  return null;
 }

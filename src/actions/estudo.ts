@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/session";
 import { siteUrl } from "@/lib/site";
+import { precoVigente } from "@/lib/preco";
 import type { FormState } from "@/lib/form-state";
 
 type ItemPedido = { produtoId: string; variacaoId: string | null };
@@ -33,18 +34,17 @@ export async function iniciarCheckout(_prev: FormState, formData: FormData): Pro
     variacao_id: string | null;
     nome: string;
     preco: number;
-    curso_id: string | null;
   }[] = [];
 
   for (const item of itens) {
     const { data: produto } = await supabase
       .from("produto")
-      .select("id, nome, preco, curso_id, ativo")
+      .select("id, nome, preco, preco_promocional, promocao_ate, ativo")
       .eq("id", item.produtoId)
       .maybeSingle();
     if (!produto || !produto.ativo) return { error: "Um produto do carrinho não está mais disponível." };
 
-    let preco = Number(produto.preco);
+    let preco = precoVigente(Number(produto.preco), produto.preco_promocional, produto.promocao_ate).atual;
     let nome = produto.nome as string;
     let variacaoId: string | null = null;
 
@@ -73,7 +73,6 @@ export async function iniciarCheckout(_prev: FormState, formData: FormData): Pro
       variacao_id: variacaoId,
       nome,
       preco,
-      curso_id: produto.curso_id,
     });
   }
 

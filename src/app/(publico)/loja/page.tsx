@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/site";
 import { formatBRL } from "@/lib/format";
+import { precoVigente } from "@/lib/preco";
 import { AvisoConfig, PageTitle } from "@/components/page-title";
 import { um } from "@/lib/relacao";
 
@@ -18,20 +19,20 @@ export default async function LojaPage() {
   const supabase = await createClient();
   const { data } = await supabase
     .from("produto")
-    .select("id, nome, slug, descricao, preco, curso:curso_id(nome)")
+    .select("id, nome, slug, descricao, preco, preco_promocional, promocao_ate, materias:produto_materia(materia:materia_id(nome))")
     .eq("ativo", true)
-    .order("nome");
+    .order("ordem");
 
   const produtos = (data ?? []).map((item) => ({
     ...item,
-    curso: um(item.curso as { nome: string } | { nome: string }[] | null),
+    materias: (item.materias as { materia: { nome: string } | { nome: string }[] | null }[] | null)?.map((linha) => um(linha.materia)).filter((materia): materia is { nome: string } => Boolean(materia)) ?? [],
   }));
 
   return (
     <div>
       <PageTitle
         title="Loja"
-        description="Cursos com aulas e prova, e também produtos que não liberam curso."
+        description="Cada produto pode liberar uma matéria ou um grupo de matérias."
       />
       {produtos.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nenhum produto publicado ainda.</p>
@@ -41,8 +42,16 @@ export default async function LojaPage() {
             <Link key={produto.id} href={`/loja/${produto.slug}`} className="rounded-xl border bg-card p-5 hover:border-primary">
               <p className="text-lg font-medium">{produto.nome}</p>
               <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{produto.descricao}</p>
-              <p className="mt-3 text-sm">{produto.curso?.nome ?? "Sem curso vinculado"}</p>
-              <p className="mt-1 font-semibold">{formatBRL(produto.preco)}</p>
+              <p className="mt-3 text-sm">
+                {produto.materias.length === 0
+                  ? "Não libera matéria"
+                  : produto.materias.length === 1
+                    ? `Inclui ${produto.materias[0].nome}`
+                    : `Inclui ${produto.materias.length} matérias`}
+              </p>
+              <p className="mt-1 font-semibold">
+                {formatBRL(precoVigente(Number(produto.preco), produto.preco_promocional, produto.promocao_ate).atual)}
+              </p>
             </Link>
           ))}
         </div>

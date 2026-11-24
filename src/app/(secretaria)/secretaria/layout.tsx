@@ -13,14 +13,13 @@ export default async function SecretariaLayout({ children }: { children: React.R
   if (session.user.papel === "admin") {
     itens.push(
       { href: "/secretaria/materias", label: "Matérias" },
-      { href: "/secretaria/cursos", label: "Cursos" },
       { href: "/secretaria/produtos", label: "Produtos" },
       { href: "/secretaria/usuarios-internos", label: "Usuários internos" }
     );
   }
 
   return (
-    <AppShell area={`${session.user.nome} · ${session.user.papel === "admin" ? "Admin" : "Secretaria"}`} items={itens}>
+    <AppShell alinhar="esquerda" area={`${session.user.nome} · ${session.user.papel === "admin" ? "Admin" : "Secretaria"}`} items={itens}>
       {children}
     </AppShell>
   );

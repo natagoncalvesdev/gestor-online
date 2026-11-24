@@ -43,7 +43,7 @@ export function CarrinhoView() {
             <div>
               <p className="font-medium">{item.nome}</p>
               <p className="text-sm text-muted-foreground">
-                {item.cursoNome ? `Curso: ${item.cursoNome}` : "Sem curso vinculado"}
+                {item.inclui}
               </p>
             </div>
             <div className="text-right">
