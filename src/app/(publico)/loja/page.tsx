@@ -4,6 +4,7 @@ import { isSupabaseConfigured } from "@/lib/site";
 import { formatBRL } from "@/lib/format";
 import { precoVigente } from "@/lib/preco";
 import { AvisoConfig, PageTitle } from "@/components/page-title";
+import { textoDeHtml } from "@/lib/html-apresentacao";
 import { um } from "@/lib/relacao";
 
 export default async function LojaPage() {
@@ -41,7 +42,7 @@ export default async function LojaPage() {
           {produtos.map((produto) => (
             <Link key={produto.id} href={`/loja/${produto.slug}`} className="rounded-xl border bg-card p-5 hover:border-primary">
               <p className="text-lg font-medium">{produto.nome}</p>
-              <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{produto.descricao}</p>
+              <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{textoDeHtml(produto.descricao)}</p>
               <p className="mt-3 text-sm">
                 {produto.materias.length === 0
                   ? "Não libera matéria"

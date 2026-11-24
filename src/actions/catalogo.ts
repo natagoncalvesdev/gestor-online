@@ -273,6 +273,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
   const nome = String(formData.get("nome") ?? "").trim();
   const slugInformado = String(formData.get("slug") ?? "").trim();
   const descricao = String(formData.get("descricao") ?? "").trim();
+  const apresentacao = String(formData.get("apresentacao") ?? "");
   const preco = Number(formData.get("preco") ?? 0);
   const promocionalInformado = String(formData.get("preco_promocional") ?? "").trim();
   const promocaoAte = String(formData.get("promocao_ate") ?? "").trim();
@@ -300,6 +301,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     nome,
     slug: slugify(slugInformado || nome),
     descricao,
+    apresentacao,
     preco,
     preco_promocional: precoPromocional,
     promocao_ate: precoPromocional == null ? null : promocaoAte || null,
@@ -317,12 +319,14 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     const { data: ultimo } = await supabase.from("produto").select("ordem").order("ordem", { ascending: false }).limit(1).maybeSingle();
     ordem = Number(ultimo?.ordem ?? 0) + 1;
   }
+
   const { error } = id
     ? await supabase.from("produto").update(payload).eq("id", id)
     : await supabase.from("produto").insert({ ...payload, ordem });
   if (error) return { error: dbMessage(error) };
   revalidatePath("/secretaria/produtos");
-  revalidatePath("/loja");
+  revalidatePath("/loja", "layout");
+  revalidatePath("/meus-cursos", "layout");
   return { ok: id ? "Produto atualizado." : "Produto criado." };
 }
 
@@ -340,6 +344,111 @@ export async function excluirProduto(_prev: FormState, formData: FormData): Prom
   revalidatePath("/secretaria/produtos");
   revalidatePath("/loja");
   redirect("/secretaria/produtos");
+}
+
+async function sincronizarCapaProduto(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  produtoId: string
+) {
+  const { data: primeira } = await supabase
+    .from("produto_imagem")
+    .select("path, imagem_zoom, imagem_x, imagem_y")
+    .eq("produto_id", produtoId)
+    .order("ordem")
+    .limit(1)
+    .maybeSingle();
+  await supabase
+    .from("produto")
+    .update({
+      imagem_path: primeira?.path ?? null,
+      imagem_zoom: primeira?.imagem_zoom ?? 1,
+      imagem_x: primeira?.imagem_x ?? 0,
+      imagem_y: primeira?.imagem_y ?? 0,
+    })
+    .eq("id", produtoId);
+}
+
+export async function salvarImagemProduto(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const produtoId = String(formData.get("produto_id") ?? "");
+  const imagem = formData.get("imagem");
+  if (!(imagem instanceof File) || imagem.size === 0) return { error: "Escolha uma imagem." };
+  if (!imagem.type.startsWith("image/")) return { error: "A imagem precisa ser JPG, PNG ou WebP." };
+  if (imagem.size > 8 * 1024 * 1024) return { error: "A imagem pode ter até 8 MB." };
+  const { admin, error: storageError } = await storageAdmin();
+  if (!admin) return { error: storageError ?? "Upload indisponível." };
+  const extensao = imagem.type === "image/png" ? "png" : imagem.type === "image/webp" ? "webp" : "jpg";
+  const path = `${produtoId}/${Date.now()}.${extensao}`;
+  const { error: uploadError } = await admin.storage.from("produtos").upload(path, Buffer.from(await imagem.arrayBuffer()), {
+    contentType: imagem.type,
+    upsert: true,
+  });
+  if (uploadError) return { error: uploadError.message };
+  const { count } = await supabase.from("produto_imagem").select("id", { count: "exact", head: true }).eq("produto_id", produtoId);
+  const zoom = Math.min(3, Math.max(1, Number(formData.get("imagem_zoom") ?? 1) || 1));
+  const x = Math.min(80, Math.max(-80, Number(formData.get("imagem_x") ?? 0) || 0));
+  const y = Math.min(80, Math.max(-80, Number(formData.get("imagem_y") ?? 0) || 0));
+  const { error } = await supabase.from("produto_imagem").insert({
+    produto_id: produtoId,
+    path,
+    ordem: (count ?? 0) + 1,
+    imagem_zoom: zoom,
+    imagem_x: x,
+    imagem_y: y,
+  });
+  if (error) return { error: dbMessage(error) };
+  await sincronizarCapaProduto(supabase, produtoId);
+  revalidatePath(`/secretaria/produtos/${produtoId}`);
+  revalidatePath("/loja", "layout");
+  revalidatePath("/meus-cursos", "layout");
+  return { ok: "Imagem adicionada." };
+}
+
+export async function excluirImagemProduto(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
+  const produtoId = String(formData.get("produto_id") ?? "");
+  const { error } = await supabase.from("produto_imagem").delete().eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  await sincronizarCapaProduto(supabase, produtoId);
+  revalidatePath(`/secretaria/produtos/${produtoId}`);
+  revalidatePath("/loja", "layout");
+  revalidatePath("/meus-cursos", "layout");
+  return { ok: "Imagem removida." };
+}
+
+export async function salvarInfoProduto(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const produtoId = String(formData.get("produto_id") ?? "");
+  const nome = String(formData.get("nome") ?? "").trim();
+  const valor = String(formData.get("valor") ?? "").trim();
+  const ordem = Number(formData.get("ordem") ?? 1);
+  if (!nome) return { error: "Informe o nome do campo." };
+  const { error } = await supabase.from("produto_info").insert({
+    produto_id: produtoId,
+    nome,
+    valor,
+    ordem,
+  });
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/produtos/${produtoId}`);
+  revalidatePath("/loja", "layout");
+  return { ok: "Informação adicionada." };
+}
+
+export async function excluirInfoProduto(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
+  const produtoId = String(formData.get("produto_id") ?? "");
+  const { error } = await supabase.from("produto_info").delete().eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/produtos/${produtoId}`);
+  revalidatePath("/loja", "layout");
+  return { ok: "Informação removida." };
 }
 
 export async function salvarVariacao(_prev: FormState, formData: FormData): Promise<FormState> {

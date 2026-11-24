@@ -42,9 +42,6 @@ export function CarrinhoView() {
           <li key={`${item.produtoId}-${item.variacaoId ?? "base"}`} className="flex items-center justify-between gap-3 p-4">
             <div>
               <p className="font-medium">{item.nome}</p>
-              <p className="text-sm text-muted-foreground">
-                {item.inclui}
-              </p>
             </div>
             <div className="text-right">
               <p>{formatBRL(item.preco)}</p>

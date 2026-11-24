@@ -2,6 +2,7 @@ import { salvarProduto } from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
 import { PageTitle } from "@/components/page-title";
 import { SubmitButton } from "@/components/submit-button";
+import { EditorApresentacao } from "@/components/secretaria/editor-apresentacao";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { requireAdmin } from "@/lib/session";
 
@@ -18,9 +19,14 @@ export default async function NovoProdutoPage() {
         <Field label="Endereço (opcional)">
           <Input name="slug" />
         </Field>
-        <Field label="Descrição">
-          <Textarea name="descricao" />
-        </Field>
+        <div>
+          <p className="mb-1 text-sm font-medium">Descrição curta</p>
+          <EditorApresentacao name="descricao" compacto dica="Aparece ao lado do preço na loja." />
+        </div>
+        <div>
+          <p className="mb-1 text-sm font-medium">Texto da loja e do curso</p>
+          <EditorApresentacao />
+        </div>
         <Field label="Preço (R$)">
           <Input name="preco" type="number" min={0} step="0.01" required />
         </Field>

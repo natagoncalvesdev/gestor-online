@@ -1,6 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { adicionarMateriaProduto, excluirVariacao, salvarProduto, salvarVariacao } from "@/actions/catalogo";
+import {
+  adicionarMateriaProduto,
+  excluirImagemProduto,
+  excluirInfoProduto,
+  excluirVariacao,
+  salvarImagemProduto,
+  salvarInfoProduto,
+  salvarProduto,
+  salvarVariacao,
+} from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
 import { ExcluirProduto } from "@/components/secretaria/excluir-produto";
 import { MateriasCursoOrdem } from "@/components/secretaria/materias-curso-ordem";
@@ -8,6 +17,9 @@ import { SubmitButton } from "@/components/submit-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { formatBRL } from "@/lib/format";
+import { EditorApresentacao } from "@/components/secretaria/editor-apresentacao";
+import { EnquadramentoImagem } from "@/components/secretaria/enquadramento-imagem";
+import { urlImagemProduto } from "@/lib/produto-imagem";
 import { lista, um } from "@/lib/relacao";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/session";
@@ -23,7 +35,7 @@ export default async function ProdutoDetalhePage({
   const [{ data: produto }, { data: materias }] = await Promise.all([
     supabase
       .from("produto")
-      .select("id, nome, slug, descricao, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, variacoes:produto_variacao(id, nome, preco, ordem, ativo), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo))")
+      .select("id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), variacoes:produto_variacao(id, nome, preco, ordem, ativo), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo))")
       .eq("id", produtoId)
       .maybeSingle(),
     supabase.from("materia").select("id, nome, codigo").eq("ativo", true).order("ordem"),
@@ -31,6 +43,12 @@ export default async function ProdutoDetalhePage({
   if (!produto) notFound();
 
   const variacoes = ((produto.variacoes ?? []) as { id: string; nome: string; preco: number; ordem: number; ativo: boolean }[])
+    .slice()
+    .sort((a, b) => a.ordem - b.ordem);
+  const infos = ((produto.infos ?? []) as { id: string; nome: string; valor: string; ordem: number }[])
+    .slice()
+    .sort((a, b) => a.ordem - b.ordem);
+  const imagens = ((produto.galeria ?? []) as { id: string; path: string; ordem: number; imagem_zoom: number; imagem_x: number; imagem_y: number }[])
     .slice()
     .sort((a, b) => a.ordem - b.ordem);
   const vinculos = lista(
@@ -74,9 +92,20 @@ export default async function ProdutoDetalhePage({
               </Field>
             </div>
             <div className="sm:col-span-2">
-              <Field label="Descrição">
-                <Textarea name="descricao" defaultValue={produto.descricao} />
-              </Field>
+              <p className="mb-1 text-sm font-medium">Descrição curta</p>
+              <EditorApresentacao
+                name="descricao"
+                valorInicial={produto.descricao ?? ""}
+                compacto
+                dica="Aparece ao lado do preço na loja. Negrito, tamanho e listas."
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <p className="mb-1 text-sm font-medium">Texto da loja e do curso</p>
+              <EditorApresentacao
+                valorInicial={produto.apresentacao ?? ""}
+                dica="Selecione o trecho, use negrito, o tamanho ou a lista. Um h2 no texto vira a faixa laranja na loja."
+              />
             </div>
             <div className="grid gap-4 sm:col-span-2 sm:grid-cols-3">
               <Field label="Preço (R$)">
@@ -121,6 +150,71 @@ export default async function ProdutoDetalhePage({
             <div className="sm:col-span-2">
               <SubmitButton size="sm">Salvar produto</SubmitButton>
             </div>
+          </ActionForm>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Imagens do produto</CardTitle>
+          <CardDescription>Várias fotos na loja, com miniaturas e zoom. A primeira é a capa em Meus cursos.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-3">
+            {imagens.map((imagem) => (
+              <div key={imagem.id} className="relative">
+                <img src={urlImagemProduto(imagem.path)!} alt="" className="size-20 rounded-md border object-cover" />
+                <ActionForm action={excluirImagemProduto} className="mt-1">
+                  <input type="hidden" name="id" value={imagem.id} />
+                  <input type="hidden" name="produto_id" value={produto.id} />
+                  <SubmitButton variant="ghost" size="sm" className="h-7 px-2 text-xs">
+                    Remover
+                  </SubmitButton>
+                </ActionForm>
+              </div>
+            ))}
+          </div>
+          <ActionForm action={salvarImagemProduto} encType="multipart/form-data" className="space-y-3">
+            <input type="hidden" name="produto_id" value={produto.id} />
+            <EnquadramentoImagem url={null} zoomInicial={1} xInicial={0} yInicial={0} />
+            <SubmitButton size="sm">Adicionar imagem</SubmitButton>
+          </ActionForm>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Informações adicionais</CardTitle>
+          <CardDescription>Nome e valor exibidos na aba da loja, por exemplo matérias, videoaulas ou carga horária.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <ul className="space-y-2">
+            {infos.map((info) => (
+              <li key={info.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+                <span>
+                  <strong>{info.nome}</strong>
+                  <span className="text-muted-foreground"> — {info.valor}</span>
+                </span>
+                <ActionForm action={excluirInfoProduto}>
+                  <input type="hidden" name="id" value={info.id} />
+                  <input type="hidden" name="produto_id" value={produto.id} />
+                  <SubmitButton variant="ghost" size="sm">
+                    Excluir
+                  </SubmitButton>
+                </ActionForm>
+              </li>
+            ))}
+          </ul>
+          <ActionForm action={salvarInfoProduto} className="grid gap-3 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
+            <input type="hidden" name="produto_id" value={produto.id} />
+            <input type="hidden" name="ordem" value={infos.length + 1} />
+            <Field label="Nome">
+              <Input name="nome" required placeholder="Matérias" />
+            </Field>
+            <Field label="Valor">
+              <Input name="valor" placeholder="17" />
+            </Field>
+            <SubmitButton size="sm">Adicionar</SubmitButton>
           </ActionForm>
         </CardContent>
       </Card>

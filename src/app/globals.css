@@ -61,3 +61,77 @@
     cursor: pointer;
   }
 }
+
+.apresentacao h2 {
+  margin-top: 1.5rem;
+  border-radius: 0.375rem;
+  background: #f7811d;
+  padding: 1rem 1.25rem;
+  text-align: center;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: white;
+}
+.apresentacao :is(p, li, ul, ol, span, div, strong, em, h3, font, b, i) {
+  background-color: transparent !important;
+}
+.apresentacao p {
+  margin-top: 1rem;
+  line-height: 1.65;
+}
+.apresentacao ul {
+  margin-top: 0.75rem;
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.apresentacao ol {
+  margin-top: 0.75rem;
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.apresentacao li {
+  margin-top: 0.35rem;
+}
+.apresentacao strong {
+  font-weight: 700;
+}
+.apresentacao h3 {
+  margin-top: 1.25rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.apresentacao .tam-pequeno {
+  font-size: 0.875rem;
+}
+.apresentacao .tam-normal {
+  font-size: 1rem;
+}
+.apresentacao .tam-grande {
+  font-size: 1.125rem;
+}
+.apresentacao .tam-titulo {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.apresentacao a {
+  color: #0d5886;
+  font-weight: 600;
+  text-decoration: underline;
+}
+.apresentacao p:has(> a:only-child) {
+  text-align: center;
+}
+.apresentacao p:has(> a:only-child) a {
+  display: inline-flex;
+  border-radius: 0.375rem;
+  background: #0d5886;
+  padding: 0.55rem 1rem;
+  color: white;
+  text-decoration: none;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}

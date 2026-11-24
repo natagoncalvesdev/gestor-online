@@ -147,7 +147,10 @@ export async function marcarAulaVista(_prev: FormState, formData: FormData): Pro
     atualizado_em: new Date().toISOString(),
   });
   if (error) return { error: error.message };
+  const matriculaId = String(formData.get("matricula_id") ?? "");
+  const materiaId = String(formData.get("materia_id") ?? "");
   revalidatePath(`/aula/${aulaId}`);
+  if (matriculaId && materiaId) revalidatePath(`/meus-cursos/${matriculaId}/${materiaId}`);
   return { ok: "Aula marcada como assistida." };
 }
 

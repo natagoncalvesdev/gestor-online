@@ -3,6 +3,7 @@
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
+import { Apresentacao } from "@/components/loja/apresentacao";
 import { formatBRL } from "@/lib/format";
 import { useState } from "react";
 
@@ -11,7 +12,6 @@ export type ItemCarrinho = {
   variacaoId: string | null;
   nome: string;
   preco: number;
-  inclui: string;
 };
 
 const CHAVE = "gestor-online-carrinho";
@@ -35,18 +35,19 @@ export function ComprarBox({
   nome,
   preco,
   precoDe = null,
-  inclui,
+  descricaoCurta = "",
   variacoes,
 }: {
   produtoId: string;
   nome: string;
   preco: number;
   precoDe?: number | null;
-  inclui: string;
+  descricaoCurta?: string;
   variacoes: { id: string; nome: string; preco: number }[];
 }) {
   const [variacaoId, setVariacaoId] = useState(variacoes[0]?.id ?? "");
   const escolhida = variacoes.find((item) => item.id === variacaoId);
+  const valor = escolhida?.preco ?? preco;
 
   function adicionar() {
     const atual = lerCarrinho().filter(
@@ -56,21 +57,22 @@ export function ComprarBox({
       produtoId,
       variacaoId: escolhida?.id ?? null,
       nome: escolhida ? `${nome} — ${escolhida.nome}` : nome,
-      preco: escolhida ? escolhida.preco : preco,
-      inclui,
+      preco: valor,
     });
     gravarCarrinho(atual);
     toast.success("Produto adicionado ao carrinho.");
   }
 
   return (
-    <div className="space-y-3 rounded-xl border bg-card p-4">
-      <p className="text-2xl font-semibold">
-        {formatBRL(escolhida?.preco ?? preco)}
-        {!escolhida && precoDe != null ? <span className="ml-2 text-base font-normal text-muted-foreground line-through">{formatBRL(precoDe)}</span> : null}
-      </p>
+    <div className="mt-4 space-y-4">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        {!escolhida && precoDe != null ? (
+          <span className="text-lg text-muted-foreground line-through">{formatBRL(precoDe)}</span>
+        ) : null}
+        <span className="text-3xl font-bold tracking-tight">{formatBRL(valor)}</span>
+      </div>
       {variacoes.length > 0 ? (
-        <label className="block space-y-1 text-sm">
+        <label className="block max-w-sm space-y-1 text-sm">
           <span className="font-medium">Opção</span>
           <Select value={variacaoId} onChange={(event) => setVariacaoId(event.target.value)}>
             {variacoes.map((item) => (
@@ -81,10 +83,12 @@ export function ComprarBox({
           </Select>
         </label>
       ) : null}
-      <p className="text-sm text-muted-foreground">
-        {inclui}
-      </p>
-      <Button type="button" variant="accent" onClick={adicionar}>
+      {descricaoCurta ? (
+        <div className="max-w-xl [&_.apresentacao>p:first-child]:mt-0">
+          <Apresentacao html={descricaoCurta} />
+        </div>
+      ) : null}
+      <Button type="button" className="h-12 w-full max-w-md uppercase tracking-wide" onClick={adicionar}>
         Adicionar ao carrinho
       </Button>
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import type { FormState } from "@/lib/form-state";
 
 export type { FormState };
@@ -9,20 +10,26 @@ export function ActionForm({
   action,
   children,
   className,
+  encType,
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   children: React.ReactNode;
   className?: string;
+  encType?: "multipart/form-data";
 }) {
   const [state, formAction] = useActionState(action, null);
+  const aviso = useRef(0);
+
+  useEffect(() => {
+    if (!state?.error && !state?.ok) return;
+    aviso.current += 1;
+    const marca = aviso.current;
+    if (state.error) toast.error(state.error, { id: `form-erro-${marca}` });
+    if (state.ok) toast.success(state.ok, { id: `form-ok-${marca}` });
+  }, [state]);
+
   return (
-    <form action={formAction} className={className}>
-      {state?.error ? (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{state.error}</p>
-      ) : null}
-      {state?.ok ? (
-        <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{state.ok}</p>
-      ) : null}
+    <form action={formAction} className={className} encType={encType}>
       {children}
     </form>
   );

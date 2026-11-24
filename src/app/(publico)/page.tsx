@@ -5,6 +5,7 @@ import { isSupabaseConfigured } from "@/lib/site";
 import { formatBRL } from "@/lib/format";
 import { precoVigente } from "@/lib/preco";
 import { AvisoConfig } from "@/components/page-title";
+import { textoDeHtml } from "@/lib/html-apresentacao";
 import { um } from "@/lib/relacao";
 
 function textoMaterias(materias: { nome: string }[]) {
@@ -64,7 +65,7 @@ export default async function HomePage() {
           {produtos.map((produto) => (
             <Link key={produto.id} href={`/loja/${produto.slug}`} className="rounded-xl border bg-card p-4 hover:border-primary">
               <p className="font-medium">{produto.nome}</p>
-              <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{produto.descricao}</p>
+              <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{textoDeHtml(produto.descricao)}</p>
               <p className="mt-3 text-sm">{textoMaterias(produto.materias)}</p>
               <p className="mt-1 font-semibold">
                 {formatBRL(precoVigente(Number(produto.preco), produto.preco_promocional, produto.promocao_ate).atual)}
