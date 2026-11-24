@@ -474,6 +474,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
   const largura = Number(formData.get("largura_cm") ?? 0);
   const altura = Number(formData.get("altura_cm") ?? 0);
   const limite = Number(formData.get("materias_simultaneas") ?? 1);
+  const categoria = String(formData.get("categoria") ?? "");
   const ativo = formData.get("ativo") === "on";
   const precoPromocional = promocionalInformado === "" ? null : Number(promocionalInformado);
 
@@ -488,6 +489,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     return { error: "Informe as medidas em centímetros, sem casas decimais." };
   }
   if (![1, 2, 3].includes(limite)) return { error: "Escolha 1, 2 ou 3 matérias ao mesmo tempo." };
+  if (!["teologia", "especializacao", "livraria"].includes(categoria)) return { error: "Escolha a categoria do produto." };
 
   const payload = {
     nome,
@@ -502,6 +504,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     largura_cm: largura,
     altura_cm: altura,
     materias_simultaneas: limite,
+    categoria,
     ativo,
   };
   if (!payload.slug) return { error: "Não foi possível gerar o endereço do produto." };

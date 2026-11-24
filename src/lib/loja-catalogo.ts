@@ -14,6 +14,7 @@ export type ProdutoLoja = {
   largura_cm: number;
   altura_cm: number;
   imagem_path: string | null;
+  categoria: "teologia" | "especializacao" | "livraria";
   materias: { nome: string }[];
 };
 
@@ -31,6 +32,7 @@ function mapProdutos(
     largura_cm: number;
     altura_cm: number;
     imagem_path: string | null;
+    categoria: "teologia" | "especializacao" | "livraria";
     materias: { materia: { nome: string } | { nome: string }[] | null }[] | null;
   }[],
 ): ProdutoLoja[] {
@@ -44,7 +46,7 @@ function mapProdutos(
 }
 
 const selectProduto =
-  "id, nome, slug, descricao, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, imagem_path, materias:produto_materia(materia:materia_id(nome))";
+  "id, nome, slug, descricao, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, imagem_path, categoria, materias:produto_materia(materia:materia_id(nome))";
 
 export async function listarProdutosLojaAtivos(): Promise<ProdutoLoja[]> {
   const supabase = await createClient();
@@ -56,25 +58,18 @@ export async function listarProdutosLojaAtivos(): Promise<ProdutoLoja[]> {
   return mapProdutos(data ?? []);
 }
 
-export function produtoEhLivraria(produto: ProdutoLoja) {
-  return (
-    produto.peso_gramas > 0 ||
-    produto.comprimento_cm > 0 ||
-    produto.largura_cm > 0 ||
-    produto.altura_cm > 0
-  );
-}
+export const CATEGORIAS_PRODUTO = [
+  { valor: "teologia", rotulo: "Curso de teologia" },
+  { valor: "especializacao", rotulo: "Curso de especialização" },
+  { valor: "livraria", rotulo: "Livraria" },
+] as const;
 
-export function produtoEhEspecializacao(produto: ProdutoLoja) {
-  return /especial/i.test(produto.nome) || /especial/i.test(produto.slug);
-}
-
-export function produtoEhTeologia(produto: ProdutoLoja) {
-  return produto.materias.length > 0 && !produtoEhEspecializacao(produto);
+export function rotuloCategoria(categoria: string) {
+  return CATEGORIAS_PRODUTO.find((item) => item.valor === categoria)?.rotulo ?? "Curso de teologia";
 }
 
 export function filtrarPorSecao(produtos: ProdutoLoja[], secao: "teologia" | "especializacoes" | "livraria") {
-  if (secao === "livraria") return produtos.filter(produtoEhLivraria);
-  if (secao === "especializacoes") return produtos.filter(produtoEhEspecializacao);
-  return produtos.filter(produtoEhTeologia);
+  if (secao === "livraria") return produtos.filter((produto) => produto.categoria === "livraria");
+  if (secao === "especializacoes") return produtos.filter((produto) => produto.categoria === "especializacao");
+  return produtos.filter((produto) => produto.categoria === "teologia");
 }

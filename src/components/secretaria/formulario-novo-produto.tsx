@@ -32,6 +32,15 @@ export function FormularioNovoProduto() {
               </Field>
             </div>
             <div className="sm:col-span-2">
+              <Field label="Categoria">
+                <Select name="categoria" defaultValue="teologia">
+                  <option value="teologia">Curso de teologia</option>
+                  <option value="especializacao">Curso de especialização</option>
+                  <option value="livraria">Livraria</option>
+                </Select>
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
               <p className="mb-1 text-sm font-medium">Descrição curta</p>
               <EditorApresentacao name="descricao" compacto dica="Aparece ao lado do preço na loja. Negrito, tamanho e listas." />
             </div>

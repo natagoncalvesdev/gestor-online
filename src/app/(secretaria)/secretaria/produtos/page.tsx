@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ProdutosOrdem } from "@/components/secretaria/produtos-ordem";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatBRL } from "@/lib/format";
+import { rotuloCategoria } from "@/lib/loja-catalogo";
 import { precoVigente } from "@/lib/preco";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/session";
@@ -11,7 +12,7 @@ export default async function ProdutosPage() {
   const supabase = await createClient();
   const { data } = await supabase
     .from("produto")
-    .select("id, nome, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, ativo, ordem, materias:produto_materia(materia_id)")
+    .select("id, nome, categoria, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, ativo, ordem, materias:produto_materia(materia_id)")
     .order("ordem");
 
   return (
@@ -33,6 +34,7 @@ export default async function ProdutosPage() {
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="px-4 py-2 font-medium">Ordem</th>
                     <th className="px-4 py-2 font-medium">Nome</th>
+                    <th className="px-4 py-2 font-medium">Categoria</th>
                     <th className="px-4 py-2 font-medium">Preço</th>
                     <th className="px-4 py-2 font-medium">Peso</th>
                     <th className="px-4 py-2 font-medium">Medidas</th>
@@ -49,6 +51,7 @@ export default async function ProdutosPage() {
                       return {
                         id: produto.id,
                         nome: produto.nome,
+                        categoria: rotuloCategoria(produto.categoria),
                         preco: formatBRL(preco.atual),
                         precoDe: preco.de != null ? formatBRL(preco.de) : null,
                         peso: `${produto.peso_gramas ?? 0} g`,

@@ -9,6 +9,7 @@ import { reordenarProdutos } from "@/actions/catalogo";
 export type LinhaProduto = {
   id: string;
   nome: string;
+  categoria: string;
   preco: string;
   precoDe: string | null;
   peso: string;
@@ -68,6 +69,7 @@ export function ProdutosOrdem({ itens }: { itens: LinhaProduto[] }) {
         </div>
       </td>
       <td className="px-4 py-3 font-medium">{produto.nome}</td>
+      <td className="px-4 py-3">{produto.categoria}</td>
       <td className="px-4 py-3 tabular-nums">
         {produto.preco}
         {produto.precoDe ? <span className="mt-0.5 block text-xs text-muted-foreground line-through">{produto.precoDe}</span> : null}

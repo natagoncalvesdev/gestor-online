@@ -36,7 +36,7 @@ export default async function ProdutoDetalhePage({
   const [{ data: produto }, { data: materias }] = await Promise.all([
     supabase
       .from("produto")
-      .select("id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), variacoes:produto_variacao(id, nome, preco, ordem, ativo), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo))")
+      .select("id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, categoria, ativo, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), variacoes:produto_variacao(id, nome, preco, ordem, ativo), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo))")
       .eq("id", produtoId)
       .maybeSingle(),
     supabase.from("materia").select("id, nome, codigo").eq("ativo", true).order("ordem"),
@@ -91,6 +91,15 @@ export default async function ProdutoDetalhePage({
             <div className="sm:col-span-2">
               <Field label="Nome">
                 <Input name="nome" defaultValue={produto.nome} required />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <Field label="Categoria">
+                <Select name="categoria" defaultValue={produto.categoria}>
+                  <option value="teologia">Curso de teologia</option>
+                  <option value="especializacao">Curso de especialização</option>
+                  <option value="livraria">Livraria</option>
+                </Select>
               </Field>
             </div>
             <div className="sm:col-span-2">
