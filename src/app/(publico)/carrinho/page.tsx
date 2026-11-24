@@ -4,7 +4,7 @@ import { PageTitle } from "@/components/page-title";
 export default function CarrinhoPage() {
   return (
     <div>
-      <PageTitle title="Carrinho" description="O pagamento abre no Mercado Pago, com PIX ou cartão." />
+      <PageTitle title="Carrinho de compras" description="Revise os itens e finalize no Mercado Pago, com PIX ou cartão." />
       <CarrinhoView />
     </div>
   );

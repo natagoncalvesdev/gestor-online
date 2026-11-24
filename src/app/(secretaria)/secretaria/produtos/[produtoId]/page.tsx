@@ -174,7 +174,7 @@ export default async function ProdutoDetalhePage({
               </div>
             ))}
           </div>
-          <ActionForm action={salvarImagemProduto} encType="multipart/form-data" className="space-y-3">
+          <ActionForm action={salvarImagemProduto} className="space-y-3">
             <input type="hidden" name="produto_id" value={produto.id} />
             <EnquadramentoImagem url={null} zoomInicial={1} xInicial={0} yInicial={0} />
             <SubmitButton size="sm">Adicionar imagem</SubmitButton>

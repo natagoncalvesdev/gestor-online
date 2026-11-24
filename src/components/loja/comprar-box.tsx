@@ -1,34 +1,15 @@
 "use client";
 
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
 import { Apresentacao } from "@/components/loja/apresentacao";
+import { useCarrinho } from "@/components/loja/carrinho-provider";
 import { formatBRL } from "@/lib/format";
+import { adicionarAoCarrinho, resumoDescricao } from "@/lib/carrinho";
 import { useState } from "react";
 
-export type ItemCarrinho = {
-  produtoId: string;
-  variacaoId: string | null;
-  nome: string;
-  preco: number;
-};
-
-const CHAVE = "gestor-online-carrinho";
-
-export function lerCarrinho(): ItemCarrinho[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const bruto = JSON.parse(localStorage.getItem(CHAVE) || "[]") as ItemCarrinho[];
-    return Array.isArray(bruto) ? bruto : [];
-  } catch {
-    return [];
-  }
-}
-
-export function gravarCarrinho(itens: ItemCarrinho[]) {
-  localStorage.setItem(CHAVE, JSON.stringify(itens));
-}
+export type { ItemCarrinho } from "@/lib/carrinho";
+export { gravarCarrinho, lerCarrinho } from "@/lib/carrinho";
 
 export function ComprarBox({
   produtoId,
@@ -36,6 +17,7 @@ export function ComprarBox({
   preco,
   precoDe = null,
   descricaoCurta = "",
+  imagemUrl = null,
   variacoes,
 }: {
   produtoId: string;
@@ -43,24 +25,25 @@ export function ComprarBox({
   preco: number;
   precoDe?: number | null;
   descricaoCurta?: string;
+  imagemUrl?: string | null;
   variacoes: { id: string; nome: string; preco: number }[];
 }) {
+  const { abrirPainel, recarregar } = useCarrinho();
   const [variacaoId, setVariacaoId] = useState(variacoes[0]?.id ?? "");
   const escolhida = variacoes.find((item) => item.id === variacaoId);
   const valor = escolhida?.preco ?? preco;
 
   function adicionar() {
-    const atual = lerCarrinho().filter(
-      (item) => !(item.produtoId === produtoId && item.variacaoId === (escolhida?.id ?? null))
-    );
-    atual.push({
+    adicionarAoCarrinho({
       produtoId,
       variacaoId: escolhida?.id ?? null,
       nome: escolhida ? `${nome} — ${escolhida.nome}` : nome,
       preco: valor,
+      imagemUrl,
+      descricaoResumo: descricaoCurta ? resumoDescricao(descricaoCurta) : undefined,
     });
-    gravarCarrinho(atual);
-    toast.success("Produto adicionado ao carrinho.");
+    recarregar();
+    abrirPainel();
   }
 
   return (

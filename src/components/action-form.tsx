@@ -10,12 +10,10 @@ export function ActionForm({
   action,
   children,
   className,
-  encType,
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   children: React.ReactNode;
   className?: string;
-  encType?: "multipart/form-data";
 }) {
   const [state, formAction] = useActionState(action, null);
   const aviso = useRef(0);
@@ -29,7 +27,7 @@ export function ActionForm({
   }, [state]);
 
   return (
-    <form action={formAction} className={className} encType={encType}>
+    <form action={formAction} className={className}>
       {children}
     </form>
   );

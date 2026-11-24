@@ -50,6 +50,7 @@ export default async function ProdutoPage({ params }: { params: Promise<{ slug: 
   const infos = lista(data.infos as { id: string; nome: string; valor: string; ordem: number }[] | null)
     .slice()
     .sort((a, b) => a.ordem - b.ordem);
+  const capaUrl = galeria[0]?.url ?? null;
 
   return (
     <div className="space-y-10">
@@ -63,6 +64,7 @@ export default async function ProdutoPage({ params }: { params: Promise<{ slug: 
             preco={preco.atual}
             precoDe={preco.de}
             descricaoCurta={data.descricao ?? ""}
+            imagemUrl={capaUrl}
             variacoes={variacoes.map((item) => ({ id: item.id, nome: item.nome, preco: Number(item.preco) }))}
           />
         </div>
