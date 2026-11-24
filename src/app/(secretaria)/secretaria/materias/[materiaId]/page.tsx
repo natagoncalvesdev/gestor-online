@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
-import { excluirAula, excluirQuestao, salvarAula, salvarMateria, salvarQuestao } from "@/actions/catalogo";
+import { criarAula, excluirQuestao, salvarMateria, salvarQuestao, salvarTopico } from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
+import { EscolaDominicalAdmin, type LicaoAdmin } from "@/components/secretaria/escola-dominical-admin";
+import { campoDataHora } from "@/lib/ebd";
+import { SequenciaAulas } from "@/components/secretaria/sequencia-aulas";
 import { SubmitButton } from "@/components/submit-button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { createClient } from "@/lib/supabase/server";
@@ -17,10 +20,10 @@ export default async function MateriaDetalhePage({
   const { data: materia } = await supabase.from("materia").select("*").eq("id", materiaId).maybeSingle();
   if (!materia) notFound();
 
-  const [{ data: aulas }, { data: questoes }] = await Promise.all([
+  const [{ data: aulas }, { data: questoes }, { data: licoes }, { data: topicos }] = await Promise.all([
     supabase
       .from("aula")
-      .select("id, titulo, ordem, bunny_video_id, epub_path, epub_nome")
+      .select("id, titulo, ordem, bunny_video_id, youtube_id, epub_path, epub_nome, topico_id, libera_em, posicao")
       .eq("materia_id", materiaId)
       .order("ordem"),
     supabase
@@ -28,7 +31,22 @@ export default async function MateriaDetalhePage({
       .select("id, enunciado, ordem, alternativas:alternativa(id, texto, correta, ordem)")
       .eq("materia_id", materiaId)
       .order("ordem"),
+    supabase
+      .from("ebd_licao")
+      .select("id, ordem, titulo, youtube_url, pdf_exibir_path, libera_em, anexos:ebd_anexo(id, nome)")
+      .eq("materia_id", materiaId)
+      .order("ordem"),
+    supabase.from("aula_topico").select("id, titulo, ordem, posicao").eq("materia_id", materiaId).order("posicao"),
   ]);
+  const aulaIds = (aulas ?? []).map((aula) => aula.id);
+  const { data: arquivos } = aulaIds.length
+    ? await supabase.from("aula_arquivo").select("id, aula_id, nome, visualizar, baixar").in("aula_id", aulaIds)
+    : { data: [] };
+
+  const sequencia = [
+    ...(topicos ?? []).map((topico) => ({ tipo: "topico" as const, posicao: Number(topico.posicao ?? topico.ordem), topico })),
+    ...(aulas ?? []).map((aula) => ({ tipo: "aula" as const, posicao: Number(aula.posicao ?? aula.ordem), aula })),
+  ].sort((a, b) => a.posicao - b.posicao);
 
   return (
     <div className="space-y-10">
@@ -54,67 +72,55 @@ export default async function MateriaDetalhePage({
           <input type="checkbox" name="ativo" defaultChecked={materia.ativo} />
           Matéria ativa
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="gratuita" defaultChecked={materia.gratuita} />
+          Matéria gratuita
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="para_todos" defaultChecked={materia.para_todos} />
+          Disponibilizar para todos os alunos
+        </label>
         <SubmitButton>Salvar matéria</SubmitButton>
       </ActionForm>
+      <EscolaDominicalAdmin
+        materiaId={materia.id}
+        licoes={((licoes ?? []) as LicaoAdmin[]).map((licao) => ({ ...licao, anexos: licao.anexos ?? [] }))}
+      />
 
-      <section className="max-w-xl space-y-2">
-        <h2 className="text-lg font-semibold">Aulas</h2>
-        <p className="text-sm text-muted-foreground">{aulas?.length ?? 0} {aulas?.length === 1 ? "aula" : "aulas"}. Abra uma linha para editar.</p>
-        {(aulas ?? []).map((aula) => (
-          <details key={aula.id} className="rounded-xl border bg-card">
-            <summary className="flex cursor-pointer items-center px-4 py-3 text-sm font-medium">
-              <span className="min-w-0 flex-1 truncate">{aula.ordem}. {aula.titulo}</span>
-            </summary>
-            <div className="space-y-3 border-t px-4 py-4">
-              <ActionForm action={salvarAula} className="grid gap-3">
-                <input type="hidden" name="id" value={aula.id} />
-                <input type="hidden" name="materia_id" value={materia.id} />
-                <Field label="Título">
-                  <Input name="titulo" defaultValue={aula.titulo} required />
-                </Field>
-                <Field label="Ordem">
-                  <Input name="ordem" type="number" min={1} defaultValue={aula.ordem} />
-                </Field>
-                <Field label="ID do vídeo no Bunny">
-                  <Input name="bunny_video_id" defaultValue={aula.bunny_video_id ?? ""} />
-                </Field>
-                <Field label={aula.epub_nome ? `Substituir livro (${aula.epub_nome})` : "Livro digital EPUB"}>
-                  <Input name="epub" type="file" accept=".epub" />
-                </Field>
-                <SubmitButton>Salvar aula</SubmitButton>
-              </ActionForm>
-              <ActionForm action={excluirAula}>
-                <input type="hidden" name="id" value={aula.id} />
-                <input type="hidden" name="materia_id" value={materia.id} />
-                <input type="hidden" name="epub_path" value={aula.epub_path ?? ""} />
-                <SubmitButton variant="ghost" pendingLabel="Excluindo...">
-                  Excluir aula
-                </SubmitButton>
-              </ActionForm>
-            </div>
-          </details>
-        ))}
-        <details className="rounded-xl border border-dashed bg-card">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Nova aula</summary>
-          <ActionForm action={salvarAula} className="grid gap-3 border-t px-4 py-4">
-            <input type="hidden" name="materia_id" value={materia.id} />
-            <Field label="Título">
-              <Input name="titulo" required />
-            </Field>
-            <Field label="Ordem">
-              <Input name="ordem" type="number" min={1} defaultValue={(aulas?.length ?? 0) + 1} />
-            </Field>
-            <Field label="ID do vídeo no Bunny">
-              <Input name="bunny_video_id" />
-            </Field>
-            <Field label="Livro digital EPUB">
-              <Input name="epub" type="file" accept=".epub" />
-            </Field>
-            <SubmitButton>Adicionar aula</SubmitButton>
-          </ActionForm>
-        </details>
+      <section className="max-w-3xl space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Tópicos e aulas</h2>
+          <div className="flex gap-2">
+            <ActionForm action={salvarTopico}>
+              <input type="hidden" name="materia_id" value={materia.id} />
+              <SubmitButton size="sm">Novo tópico</SubmitButton>
+            </ActionForm>
+            <ActionForm action={criarAula}>
+              <input type="hidden" name="materia_id" value={materia.id} />
+              <SubmitButton size="sm" variant="outline">Nova aula</SubmitButton>
+            </ActionForm>
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground">Arraste para mudar a posição. A aula fica no tópico que estiver acima dela.</p>
+        <SequenciaAulas
+          materiaId={materia.id}
+          itens={sequencia.map((item) =>
+            item.tipo === "topico"
+              ? { tipo: "topico", id: item.topico.id, titulo: item.topico.titulo }
+              : {
+                  tipo: "aula",
+                  id: item.aula.id,
+                  titulo: item.aula.titulo,
+                  ordem: item.aula.ordem,
+                  video: item.aula.youtube_id ? `https://youtu.be/${item.aula.youtube_id}` : item.aula.bunny_video_id ?? "",
+                  liberaEm: campoDataHora(item.aula.libera_em),
+                  epubNome: item.aula.epub_nome,
+                  epubPath: item.aula.epub_path,
+                  arquivos: (arquivos ?? []).filter((arquivo) => arquivo.aula_id === item.aula.id),
+                }
+          )}
+        />
       </section>
-
       <section className="max-w-xl space-y-2">
         <h2 className="text-lg font-semibold">Prova</h2>
         <p className="text-sm text-muted-foreground">{questoes?.length ?? 0} {questoes?.length === 1 ? "questão" : "questões"}. Abra uma linha para ver as alternativas.</p>

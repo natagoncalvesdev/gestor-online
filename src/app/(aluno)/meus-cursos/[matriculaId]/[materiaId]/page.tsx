@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import { Lock } from "lucide-react";
 import { Apresentacao } from "@/components/loja/apresentacao";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { requireAluno } from "@/lib/session";
 import { CapaProduto } from "@/components/loja/capa-produto";
 import { urlImagemProduto } from "@/lib/produto-imagem";
+import { licaoLiberada, textoLiberacao } from "@/lib/ebd";
 import { um } from "@/lib/relacao";
 
 export default async function MateriaAlunoPage({
@@ -48,11 +50,15 @@ export default async function MateriaAlunoPage({
     );
   }
 
-  const { data: aulas } = await supabase
-    .from("aula")
-    .select("id, titulo, ordem")
-    .eq("materia_id", materiaId)
-    .order("ordem");
+  const admin = createServiceRoleClient();
+  const { count: questoes } = admin
+    ? await admin.from("questao").select("id", { count: "exact", head: true }).eq("materia_id", materiaId)
+    : { count: 0 };
+
+  const [{ data: aulas }, { data: topicos }] = await Promise.all([
+    supabase.from("aula").select("id, titulo, ordem, topico_id, libera_em, posicao").eq("materia_id", materiaId).order("posicao"),
+    supabase.from("aula_topico").select("id, titulo, ordem, posicao").eq("materia_id", materiaId).order("posicao"),
+  ]);
   const ids = (aulas ?? []).map((aula) => aula.id);
   const { data: progresso } = ids.length
     ? await supabase.from("aula_progresso").select("aula_id, video_concluido").eq("aluno_id", session.user.id).in("aula_id", ids)
@@ -103,33 +109,73 @@ export default async function MateriaAlunoPage({
       <section className="rounded-xl border bg-card">
         <h2 className="px-4 pt-4 font-medium">Conteúdo</h2>
         <ul>
-          {(aulas ?? []).map((aula) => {
+          {(topicos ?? []).map((topico) => {
+            const doTopico = (aulas ?? []).filter((aula) => aula.topico_id === topico.id);
+            if (doTopico.length === 0) return null;
+            return (
+              <li key={topico.id} className="border-t">
+                <p className="bg-secondary/60 px-4 py-2 text-sm font-semibold">{topico.titulo}</p>
+                <ul>
+                  {doTopico.map((aula) => {
+                    const vista = vistas.has(aula.id);
+                    const liberada = !aula.libera_em || licaoLiberada(aula.libera_em);
+                    return (
+                      <li key={aula.id}>
+                        {liberada ? (
+                          <Link href={`/aula/${aula.id}?matricula=${matriculaId}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/60">
+                            <span className={vista ? "size-5 shrink-0 rounded-full bg-primary" : "size-5 shrink-0 rounded-full border-2 border-muted-foreground/40"} />
+                            <span className="text-primary underline-offset-2 hover:underline">{aula.ordem} – {aula.titulo}</span>
+                          </Link>
+                        ) : (
+                          <div className="flex items-center gap-3 px-4 py-3 opacity-70">
+                            <span className="size-5 shrink-0 rounded-full border-2 border-muted-foreground/40" />
+                            <span>{aula.ordem} – {aula.titulo}</span>
+                            <span className="ml-auto text-sm text-muted-foreground">{textoLiberacao(aula.libera_em)}</span>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            );
+          })}
+          {(aulas ?? []).filter((aula) => !aula.topico_id).map((aula) => {
             const vista = vistas.has(aula.id);
+            const liberada = !aula.libera_em || licaoLiberada(aula.libera_em);
             return (
               <li key={aula.id} className="border-t">
-                <Link href={`/aula/${aula.id}?matricula=${matriculaId}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/60">
-                  <span className={vista ? "size-5 shrink-0 rounded-full bg-primary" : "size-5 shrink-0 rounded-full border-2 border-muted-foreground/40"} />
-                  <span className="text-primary underline-offset-2 hover:underline">
-                    {aula.ordem} – {aula.titulo}
-                  </span>
-                </Link>
+                {liberada ? (
+                  <Link href={`/aula/${aula.id}?matricula=${matriculaId}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/60">
+                    <span className={vista ? "size-5 shrink-0 rounded-full bg-primary" : "size-5 shrink-0 rounded-full border-2 border-muted-foreground/40"} />
+                    <span className="text-primary underline-offset-2 hover:underline">{aula.ordem} – {aula.titulo}</span>
+                  </Link>
+                ) : (
+                  <div className="flex items-center gap-3 px-4 py-3 opacity-70">
+                    <span className="size-5 shrink-0 rounded-full border-2 border-muted-foreground/40" />
+                    <span>{aula.ordem} – {aula.titulo}</span>
+                    <span className="ml-auto text-sm text-muted-foreground">{textoLiberacao(aula.libera_em)}</span>
+                  </div>
+                )}
               </li>
             );
           })}
         </ul>
       </section>
 
-      <section className="rounded-xl border bg-card p-4">
-        <h2 className="font-medium">Prova final</h2>
-        {acesso.status === "liberada" ? (
-          <Link href={`/prova/${materiaId}`} className="mt-3 flex items-center gap-2 text-primary underline-offset-2 hover:underline">
-            <Lock className="size-4" />
-            Prova – {materia?.nome}
-          </Link>
-        ) : (
-          <p className="mt-2 text-sm text-emerald-800">Matéria concluída.</p>
-        )}
-      </section>
+      {(questoes ?? 0) > 0 ? (
+        <section className="rounded-xl border bg-card p-4">
+          <h2 className="font-medium">Prova final</h2>
+          {acesso.status === "liberada" ? (
+            <Link href={`/prova/${materiaId}`} className="mt-3 flex items-center gap-2 text-primary underline-offset-2 hover:underline">
+              <Lock className="size-4" />
+              Prova – {materia?.nome}
+            </Link>
+          ) : (
+            <p className="mt-2 text-sm text-emerald-800">Matéria concluída.</p>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }

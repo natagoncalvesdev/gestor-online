@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { requireAluno } from "@/lib/session";
 import { PageTitle } from "@/components/page-title";
@@ -17,16 +18,29 @@ export default async function MeusCursosPage() {
     .order("data_criacao", { ascending: false });
 
   const matriculas = data ?? [];
+  const admin = createServiceRoleClient();
+  const { data: abertas } = admin
+    ? await admin.from("materia").select("id, nome, gratuita").eq("para_todos", true).eq("ativo", true).order("ordem")
+    : { data: [] };
 
   return (
     <div>
       <PageTitle title="Meus cursos" description="Os produtos liberados para a sua conta." />
-      {matriculas.length === 0 ? (
+      {matriculas.length === 0 && (abertas ?? []).length === 0 ? (
         <p className="text-sm text-muted-foreground">
           Nenhum produto liberado ainda. <Link href="/loja">Ver a loja</Link>.
         </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
+          {(abertas ?? []).map((materia) => (
+            <Link key={materia.id} href={`/meus-cursos/aberto/${materia.id}`} className="overflow-hidden rounded-xl border bg-card hover:border-primary">
+              <div className="aspect-square w-full bg-primary" />
+              <div className="p-4">
+                <p className="font-semibold">{materia.nome}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{materia.gratuita ? "Gratuita para todos os alunos" : "Disponível para todos os alunos"}</p>
+              </div>
+            </Link>
+          ))}
           {matriculas.map((matricula) => {
             const produto = um(
               matricula.produto as

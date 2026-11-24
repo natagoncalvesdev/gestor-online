@@ -1,4 +1,5 @@
 import { atualizarPerfil } from "@/actions/alunos";
+import { logout } from "@/actions/auth";
 import { ActionForm } from "@/components/action-form";
 import { PageTitle } from "@/components/page-title";
 import { SubmitButton } from "@/components/submit-button";
@@ -77,6 +78,9 @@ export default async function PerfilPage() {
           <SubmitButton>Salvar contato e endereço</SubmitButton>
         </div>
       </ActionForm>
+      <form action={logout} className="mt-4">
+        <SubmitButton variant="outline">Sair</SubmitButton>
+      </form>
     </div>
   );
 }

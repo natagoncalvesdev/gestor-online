@@ -30,6 +30,14 @@ export default async function NovaMateriaPage() {
           <input type="checkbox" name="ativo" defaultChecked />
           Matéria ativa
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="gratuita" />
+          Matéria gratuita
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="para_todos" />
+          Disponibilizar para todos os alunos
+        </label>
         <SubmitButton>Criar matéria</SubmitButton>
       </ActionForm>
     </div>

@@ -33,6 +33,7 @@ function isAlunoApp(pathname: string) {
     pathname.startsWith("/prova") ||
     pathname.startsWith("/pedidos") ||
     pathname.startsWith("/perfil") ||
+    pathname.startsWith("/indicacoes") ||
     pathname.startsWith("/checkout")
   );
 }

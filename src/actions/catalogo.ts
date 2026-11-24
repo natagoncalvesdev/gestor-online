@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/session";
+import { horarioBrasilia, idYoutube } from "@/lib/ebd";
 import { slugify } from "@/lib/slug";
 import type { FormState } from "@/lib/form-state";
 
@@ -29,7 +30,9 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
   const descricao = String(formData.get("descricao") ?? "").trim();
   const carga = Number(formData.get("carga_horaria") ?? 0);
   const nota = Number(formData.get("nota_minima") ?? 7);
-  const ativo = formData.get("ativo") === "on";
+  const ativa = formData.get("ativo") === "on";
+  const gratuita = formData.get("gratuita") === "on";
+  const paraTodos = formData.get("para_todos") === "on";
 
   if (!nome || !codigo) return { error: "Informe o nome e o código da matéria." };
   if (Number.isNaN(nota) || nota < 0 || nota > 10) return { error: "A nota mínima fica entre 0 e 10." };
@@ -40,7 +43,9 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
     descricao,
     carga_horaria: Number.isFinite(carga) ? carga : 0,
     nota_minima: nota,
-    ativo,
+    ativo: ativa,
+    gratuita,
+    para_todos: paraTodos,
   };
 
   let ordem = 1;
@@ -48,12 +53,14 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
     const { data: ultima } = await supabase.from("materia").select("ordem").order("ordem", { ascending: false }).limit(1).maybeSingle();
     ordem = Number(ultima?.ordem ?? 0) + 1;
   }
-  const { error } = id
-    ? await supabase.from("materia").update(payload).eq("id", id)
-    : await supabase.from("materia").insert({ ...payload, ordem });
 
-  if (error) return { error: dbMessage(error) };
+  const { data: criada, error } = id
+    ? await supabase.from("materia").update(payload).eq("id", id).select("id").single()
+    : await supabase.from("materia").insert({ ...payload, ordem }).select("id").single();
+
+  if (error || !criada) return { error: error ? dbMessage(error) : "Não foi possível salvar a matéria." };
   revalidatePath("/secretaria/materias");
+  revalidatePath(`/secretaria/materias/${criada.id}`);
   return { ok: id ? "Matéria atualizada." : "Matéria criada." };
 }
 
@@ -64,7 +71,10 @@ export async function salvarAula(_prev: FormState, formData: FormData): Promise<
   const materiaId = String(formData.get("materia_id") ?? "");
   const titulo = String(formData.get("titulo") ?? "").trim();
   const ordem = Number(formData.get("ordem") ?? 1);
-  const bunny = String(formData.get("bunny_video_id") ?? "").trim();
+  const video = String(formData.get("bunny_video_id") ?? "").trim();
+  const youtube = idYoutube(video);
+  const topicoInformado = formData.has("topico_id");
+  const topicoId = String(formData.get("topico_id") ?? "").trim() || null;
   const file = formData.get("epub");
 
   if (!titulo || !materiaId) return { error: "Informe o título da aula." };
@@ -94,7 +104,10 @@ export async function salvarAula(_prev: FormState, formData: FormData): Promise<
       materia_id: materiaId,
       titulo,
       ordem,
-      bunny_video_id: bunny || null,
+      bunny_video_id: youtube ? null : video || null,
+      youtube_id: youtube,
+      ...(topicoInformado ? { topico_id: topicoId } : {}),
+      libera_em: horarioBrasilia(String(formData.get("libera_em") ?? "")),
       epub_path: epubPath,
       epub_nome: epubNome,
     };
@@ -107,7 +120,10 @@ export async function salvarAula(_prev: FormState, formData: FormData): Promise<
       materia_id: materiaId,
       titulo,
       ordem,
-      bunny_video_id: bunny || null,
+      bunny_video_id: youtube ? null : video || null,
+      youtube_id: youtube,
+      ...(topicoInformado ? { topico_id: topicoId } : {}),
+      libera_em: horarioBrasilia(String(formData.get("libera_em") ?? "")),
     };
     const { error: saveError } = id
       ? await supabase.from("aula").update(payload).eq("id", id)
@@ -125,14 +141,166 @@ export async function excluirAula(_prev: FormState, formData: FormData): Promise
   const id = String(formData.get("id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
   const epubPath = String(formData.get("epub_path") ?? "");
+  const { data: arquivos } = await supabase.from("aula_arquivo").select("path").eq("aula_id", id);
   const { error } = await supabase.from("aula").delete().eq("id", id);
   if (error) return { error: dbMessage(error) };
-  if (epubPath) {
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  const admin = createServiceRoleClient();
+  const paths = [epubPath, ...(arquivos ?? []).map((arquivo) => arquivo.path)].filter(Boolean);
+  if (paths.length && admin) await admin.storage.from("ebooks").remove(paths);
+  return { ok: "Aula excluída." };
+}
+
+export async function adicionarArquivoAula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const aulaId = String(formData.get("aula_id") ?? "");
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const modo = String(formData.get("modo") ?? "");
+  const visualizar = modo === "visualizar" || modo === "ambos";
+  const baixar = modo === "baixar" || modo === "ambos";
+  const nome = String(formData.get("nome") ?? "").trim();
+  const arquivo = formData.get("arquivo");
+  if (!nome) return { error: "Informe o nome do arquivo." };
+  if (!visualizar && !baixar) return { error: "Escolha visualizar, baixar ou os dois." };
+  if (!(arquivo instanceof File) || arquivo.size === 0) return { error: "Escolha um arquivo." };
+  const { admin, error: storageError } = await storageAdmin();
+  if (!admin) return { error: storageError };
+  const supabase = await createClient();
+  const extensao = arquivo.name.includes(".") ? arquivo.name.slice(arquivo.name.lastIndexOf(".")) : "";
+  const nomeFinal = extensao && !nome.toLowerCase().endsWith(extensao.toLowerCase()) ? `${nome}${extensao}` : nome;
+  const path = `arquivos/${aulaId}/${crypto.randomUUID()}-${arquivo.name.replace(/[^\w.\-]+/g, "_")}`;
+  const { error: uploadError } = await admin.storage.from("ebooks").upload(path, Buffer.from(await arquivo.arrayBuffer()), {
+    contentType: arquivo.type || "application/octet-stream",
+    upsert: false,
+  });
+  if (uploadError) return { error: uploadError.message };
+  const { error } = await supabase.from("aula_arquivo").insert({
+    aula_id: aulaId,
+    nome: nomeFinal,
+    path,
+    mime: arquivo.type || "application/octet-stream",
+    visualizar,
+    baixar,
+  });
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  revalidatePath(`/aula/${aulaId}`);
+  return { ok: "Arquivo adicionado." };
+}
+
+export async function excluirArquivoAula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const aulaId = String(formData.get("aula_id") ?? "");
+  const { data: arquivo } = await supabase.from("aula_arquivo").select("path").eq("id", id).maybeSingle();
+  const { error } = await supabase.from("aula_arquivo").delete().eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  if (arquivo?.path) {
     const admin = createServiceRoleClient();
-    await admin?.storage.from("ebooks").remove([epubPath]);
+    await admin?.storage.from("ebooks").remove([arquivo.path]);
   }
   revalidatePath(`/secretaria/materias/${materiaId}`);
-  return { ok: "Aula excluída." };
+  revalidatePath(`/aula/${aulaId}`);
+  return { ok: "Arquivo removido." };
+}
+
+export async function clonarAula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const { data: aula } = await supabase.from("aula").select("titulo, topico_id, bunny_video_id, youtube_id, libera_em, posicao").eq("id", id).maybeSingle();
+  if (!aula) return { error: "Aula não encontrada." };
+  const { data: ultima } = await supabase.from("aula").select("ordem").eq("materia_id", materiaId).order("ordem", { ascending: false }).limit(1).maybeSingle();
+  const origem = Number(aula.posicao ?? 0);
+  const [{ data: aulasDepois }, { data: topicosDepois }] = await Promise.all([
+    supabase.from("aula").select("id, posicao").eq("materia_id", materiaId).gt("posicao", origem),
+    supabase.from("aula_topico").select("id, posicao").eq("materia_id", materiaId).gt("posicao", origem),
+  ]);
+  for (const item of aulasDepois ?? []) {
+    await supabase.from("aula").update({ posicao: Number(item.posicao) + 1 }).eq("id", item.id);
+  }
+  for (const item of topicosDepois ?? []) {
+    await supabase.from("aula_topico").update({ posicao: Number(item.posicao) + 1 }).eq("id", item.id);
+  }
+  const { data: copia, error } = await supabase.from("aula").insert({
+    materia_id: materiaId,
+    titulo: `${aula.titulo} (cópia)`,
+    ordem: Number(ultima?.ordem ?? 0) + 1,
+    topico_id: aula.topico_id,
+    posicao: origem + 1,
+    bunny_video_id: aula.bunny_video_id,
+    youtube_id: aula.youtube_id,
+    libera_em: aula.libera_em,
+  }).select("id").single();
+  if (error || !copia) return { error: error ? dbMessage(error) : "Não foi possível clonar a aula." };
+  const { data: arquivos } = await supabase.from("aula_arquivo").select("nome, path, mime, visualizar, baixar").eq("aula_id", id);
+  if (arquivos?.length) {
+    await supabase.from("aula_arquivo").insert(arquivos.map((arquivo) => ({ ...arquivo, aula_id: copia.id })));
+  }
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Aula clonada." };
+}
+
+export async function salvarTopico(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const { count } = await supabase.from("aula_topico").select("id", { count: "exact", head: true }).eq("materia_id", materiaId);
+  const { error } = await supabase.from("aula_topico").insert({
+    materia_id: materiaId,
+    titulo: `Tópico ${(count ?? 0) + 1}`,
+    ordem: (count ?? 0) + 1,
+    posicao: await proximaPosicao(supabase, materiaId),
+  });
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Tópico criado." };
+}
+
+export async function criarAula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const { count } = await supabase.from("aula").select("id", { count: "exact", head: true }).eq("materia_id", materiaId);
+  const { data: topico } = await supabase
+    .from("aula_topico")
+    .select("id")
+    .eq("materia_id", materiaId)
+    .order("posicao", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const numero = (count ?? 0) + 1;
+  const { error } = await supabase.from("aula").insert({
+    materia_id: materiaId,
+    titulo: `Aula ${numero}`,
+    ordem: numero,
+    topico_id: topico?.id ?? null,
+    posicao: await proximaPosicao(supabase, materiaId),
+  });
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Aula criada." };
+}
+
+async function proximaPosicao(supabase: Awaited<ReturnType<typeof createClient>>, materiaId: string) {
+  const [{ data: aula }, { data: topico }] = await Promise.all([
+    supabase.from("aula").select("posicao").eq("materia_id", materiaId).order("posicao", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("aula_topico").select("posicao").eq("materia_id", materiaId).order("posicao", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  return Math.max(Number(aula?.posicao ?? 0), Number(topico?.posicao ?? 0)) + 1;
+}
+
+export async function excluirTopico(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const { error } = await supabase.from("aula_topico").delete().eq("id", String(formData.get("id") ?? ""));
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Tópico removido. As aulas continuam na matéria." };
 }
 
 export async function salvarQuestao(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -248,6 +416,30 @@ export async function reordenarProdutos(produtoIds: string[]): Promise<{ ok: tru
   }
   revalidatePath("/secretaria/produtos");
   revalidatePath("/loja");
+  return { ok: true };
+}
+
+export async function reordenarConteudo(
+  materiaId: string,
+  itens: { tipo: "topico" | "aula"; id: string }[]
+): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+  let topicoAtual: string | null = null;
+  for (let indice = 0; indice < itens.length; indice += 1) {
+    const item = itens[indice];
+    const posicao = indice + 1;
+    if (item.tipo === "topico") {
+      topicoAtual = item.id;
+      const { error } = await supabase.from("aula_topico").update({ posicao, ordem: posicao }).eq("id", item.id);
+      if (error) return { error: dbMessage(error) };
+    } else {
+      const { error } = await supabase.from("aula").update({ posicao, ordem: posicao, topico_id: topicoAtual }).eq("id", item.id);
+      if (error) return { error: dbMessage(error) };
+    }
+  }
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  revalidatePath("/meus-cursos", "layout");
   return { ok: true };
 }
 
