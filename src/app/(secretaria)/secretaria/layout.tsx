@@ -14,6 +14,7 @@ export default async function SecretariaLayout({ children }: { children: React.R
     itens.push(
       { href: "/secretaria/materias", label: "Matérias" },
       { href: "/secretaria/produtos", label: "Produtos" },
+      { href: "/secretaria/pagina-inicial", label: "Página inicial" },
       { href: "/secretaria/usuarios-internos", label: "Usuários internos" }
     );
   }

@@ -1,79 +1,89 @@
-import Link from "next/link";
-import { Logo } from "@/components/brand/logo";
-import { createClient } from "@/lib/supabase/server";
-import { isSupabaseConfigured } from "@/lib/site";
-import { formatBRL } from "@/lib/format";
-import { precoVigente } from "@/lib/preco";
+import { CardsPortal } from "@/components/loja/cards-portal";
+import { AvaliacoesInicio } from "@/components/inicio/avaliacoes-inicio";
+import { CarrosselBanners } from "@/components/inicio/carrossel-banners";
+import { InstagramInicio } from "@/components/inicio/instagram-inicio";
 import { AvisoConfig } from "@/components/page-title";
-import { textoDeHtml } from "@/lib/html-apresentacao";
-import { um } from "@/lib/relacao";
-
-function textoMaterias(materias: { nome: string }[]) {
-  if (materias.length === 0) return "Não libera matéria";
-  if (materias.length === 1) return `Inclui ${materias[0].nome}`;
-  return `Inclui ${materias.length} matérias`;
-}
+import { buscarGoogle, buscarInstagram } from "@/lib/home-apis";
+import { urlImagemSite } from "@/lib/site-imagem";
+import { isSupabaseConfigured } from "@/lib/site";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function HomePage() {
-  let produtos: {
-    id: string;
-    nome: string;
-    slug: string;
-    preco: number;
-    preco_promocional: number | null;
-    promocao_ate: string | null;
-    descricao: string;
-    materias: { nome: string }[];
-  }[] = [];
-
-  if (isSupabaseConfigured()) {
-    const supabase = await createClient();
-    const { data } = await supabase
-      .from("produto")
-      .select("id, nome, slug, preco, preco_promocional, promocao_ate, descricao, materias:produto_materia(materia:materia_id(nome))")
-      .eq("ativo", true)
-      .order("ordem")
-      .limit(6);
-    produtos = (data ?? []).map((item) => ({
-      ...item,
-      materias: (item.materias as { materia: { nome: string } | { nome: string }[] | null }[] | null)?.map((linha) => um(linha.materia)).filter((materia): materia is { nome: string } => Boolean(materia)) ?? [],
-    }));
+  if (!isSupabaseConfigured()) {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-8">
+        <AvisoConfig />
+      </div>
+    );
   }
 
+  const supabase = await createClient();
+  const { data: banners } = await supabase
+    .from("home_banner")
+    .select("id, imagem_path, imagem_zoom, imagem_x, imagem_y, link")
+    .eq("ativo", true)
+    .order("ordem");
+  const admin = createServiceRoleClient();
+  const { data: integracao } = admin
+    ? await admin.from("home_integracao").select("google_api_key, google_place_id, instagram_token").eq("id", 1).maybeSingle()
+    : { data: null };
+  const [google, instagram] = await Promise.all([
+    buscarGoogle({
+      google_api_key: integracao?.google_api_key ?? "",
+      google_place_id: integracao?.google_place_id ?? "",
+    }),
+    buscarInstagram(integracao?.instagram_token ?? ""),
+  ]);
+
+  const faixa = (banners ?? [])
+    .map((item) => {
+      const src = urlImagemSite(item.imagem_path);
+      if (!src) return null;
+      return {
+        id: item.id,
+        src,
+        zoom: Number(item.imagem_zoom),
+        x: Number(item.imagem_x),
+        y: Number(item.imagem_y),
+        link: item.link,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
   return (
-    <div className="space-y-12">
-      <section className="rounded-2xl bg-primary px-6 py-12 text-primary-foreground">
-        <Logo size={72} />
-        <h1 className="mt-3 max-w-2xl text-4xl font-semibold">A Palavra de Deus é a nossa prioridade</h1>
-        <p className="mt-4 max-w-2xl text-white/85">
-          Estude teologia no seu tempo. Crie sua conta, escolha um produto na loja e acompanhe as aulas,
-          o livro digital e a prova.
-        </p>
-        <div className="mt-6 flex gap-3">
-          <Link href="/loja" className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground">
-            Ver a loja
-          </Link>
-          <Link href="/cadastro" className="rounded-md border border-white/30 px-4 py-2 text-sm">
-            Criar conta
-          </Link>
+    <div className="relative left-1/2 w-screen max-w-[100vw] -translate-x-1/2 -mt-8 -mb-8 overflow-x-hidden">
+      <CarrosselBanners banners={faixa} />
+      <div className="h-3 bg-accent" aria-hidden />
+      {google.dados ? (
+        <AvaliacoesInicio
+          titulo="O que falam sobre o CETADEB"
+          nota={google.dados.nota}
+          resumo={google.dados.resumo}
+          link={google.dados.link}
+          avaliacoes={google.dados.avaliacoes}
+        />
+      ) : null}
+      <section className="relative overflow-hidden bg-linear-to-r from-[#0a4d73] via-[#1a6a96] to-[#e8882d] px-4 py-12 text-white sm:px-8 sm:py-16">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage: `
+              radial-gradient(circle, rgba(255, 255, 255, 0.14) 1.25px, transparent 1.25px),
+              linear-gradient(115deg, #0a4d73 0%, #1a6a96 45%, #e8882d 100%)
+            `,
+            backgroundSize: "28px 28px, 100% 100%",
+          }}
+          aria-hidden
+        />
+        <div className="relative mx-auto max-w-6xl">
+          <h2 className="mb-8 text-center text-2xl font-bold uppercase tracking-wide sm:text-3xl">
+            Estude em nossa plataforma
+          </h2>
+          <CardsPortal />
         </div>
       </section>
-      {!isSupabaseConfigured() ? <AvisoConfig /> : null}
-      <section>
-        <h2 className="text-xl font-semibold">Na loja</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {produtos.map((produto) => (
-            <Link key={produto.id} href={`/loja/${produto.slug}`} className="rounded-xl border bg-card p-4 hover:border-primary">
-              <p className="font-medium">{produto.nome}</p>
-              <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{textoDeHtml(produto.descricao)}</p>
-              <p className="mt-3 text-sm">{textoMaterias(produto.materias)}</p>
-              <p className="mt-1 font-semibold">
-                {formatBRL(precoVigente(Number(produto.preco), produto.preco_promocional, produto.promocao_ate).atual)}
-              </p>
-            </Link>
-          ))}
-        </div>
-      </section>
+      <InstagramInicio posts={instagram.posts} />
     </div>
   );
 }

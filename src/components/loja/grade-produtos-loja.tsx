@@ -35,7 +35,7 @@ export function GradeProdutosLoja({
             href={`/loja/${produto.slug}`}
             className="overflow-hidden rounded-xl border bg-card hover:border-primary"
           >
-            {capa ? <CapaProduto src={capa} className="aspect-[4/3]" /> : null}
+            {capa ? <CapaProduto src={capa} proporcao="aspect-[4/3]" /> : null}
             <div className="p-5">
               <p className="text-lg font-medium">{produto.nome}</p>
               <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{textoDeHtml(produto.descricao)}</p>

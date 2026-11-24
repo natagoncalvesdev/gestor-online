@@ -320,14 +320,22 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     ordem = Number(ultimo?.ordem ?? 0) + 1;
   }
 
-  const { error } = id
-    ? await supabase.from("produto").update(payload).eq("id", id)
-    : await supabase.from("produto").insert({ ...payload, ordem });
-  if (error) return { error: dbMessage(error) };
+  if (id) {
+    const { error } = await supabase.from("produto").update(payload).eq("id", id);
+    if (error) return { error: dbMessage(error) };
+    revalidatePath("/secretaria/produtos");
+    revalidatePath(`/secretaria/produtos/${id}`);
+    revalidatePath("/loja", "layout");
+    revalidatePath("/meus-cursos", "layout");
+    return { ok: "Produto atualizado." };
+  }
+
+  const { data: criado, error } = await supabase.from("produto").insert({ ...payload, ordem }).select("id").single();
+  if (error || !criado) return { error: error ? dbMessage(error) : "Não foi possível criar o produto." };
   revalidatePath("/secretaria/produtos");
   revalidatePath("/loja", "layout");
   revalidatePath("/meus-cursos", "layout");
-  return { ok: id ? "Produto atualizado." : "Produto criado." };
+  redirect(`/secretaria/produtos/${criado.id}`);
 }
 
 export async function excluirProduto(_prev: FormState, formData: FormData): Promise<FormState> {

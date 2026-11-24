@@ -4,15 +4,17 @@ export function CapaProduto({
   x = 0,
   y = 0,
   className = "",
+  proporcao = "aspect-square",
 }: {
   src: string;
   zoom?: number;
   x?: number;
   y?: number;
   className?: string;
+  proporcao?: string;
 }) {
   return (
-    <div className={`relative aspect-square overflow-hidden bg-secondary ${className}`}>
+    <div className={`relative overflow-hidden bg-secondary ${proporcao} ${className}`}>
       <img
         src={src}
         alt=""

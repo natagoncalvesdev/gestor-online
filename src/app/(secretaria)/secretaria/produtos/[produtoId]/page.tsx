@@ -11,6 +11,7 @@ import {
   salvarVariacao,
 } from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
+import { CopiarLinkProduto } from "@/components/secretaria/copiar-link-produto";
 import { ExcluirProduto } from "@/components/secretaria/excluir-produto";
 import { MateriasCursoOrdem } from "@/components/secretaria/materias-curso-ordem";
 import { SubmitButton } from "@/components/submit-button";
@@ -71,6 +72,7 @@ export default async function ProdutoDetalhePage({
           <p className="text-sm text-muted-foreground">Preço, peso, medidas e as matérias que este produto libera.</p>
         </div>
         <div className="flex items-center gap-2">
+          <CopiarLinkProduto slug={produto.slug} />
           <ExcluirProduto id={produto.id} nome={produto.nome} />
           <Link href="/secretaria/produtos" className="inline-flex h-8 items-center rounded-md border bg-white px-3 text-xs font-medium hover:bg-secondary">
             Voltar à lista

@@ -8,11 +8,15 @@ export function EnquadramentoImagem({
   zoomInicial,
   xInicial,
   yInicial,
+  proporcao = "aspect-square",
+  dica = "Arraste a imagem para posicionar e use o zoom. Salve para gravar este enquadramento.",
 }: {
   url: string | null;
   zoomInicial: number;
   xInicial: number;
   yInicial: number;
+  proporcao?: string;
+  dica?: string;
 }) {
   const [zoom, setZoom] = useState(zoomInicial);
   const [x, setX] = useState(xInicial);
@@ -46,7 +50,7 @@ export function EnquadramentoImagem({
       {src ? (
         <>
           <div
-            className="relative aspect-square max-w-md cursor-grab overflow-hidden rounded-md border bg-secondary active:cursor-grabbing"
+            className={`relative max-w-3xl cursor-grab overflow-hidden rounded-md border bg-secondary active:cursor-grabbing ${proporcao}`}
             onPointerDown={(evento) => {
               arraste.current = { px: evento.clientX, py: evento.clientY, x, y };
               evento.currentTarget.setPointerCapture(evento.pointerId);
@@ -88,7 +92,7 @@ export function EnquadramentoImagem({
               Aumentar
             </button>
           </div>
-          <p className="text-xs text-muted-foreground">Arraste a imagem para posicionar e use o zoom. Salve o produto para gravar este enquadramento.</p>
+          <p className="text-xs text-muted-foreground">{dica}</p>
         </>
       ) : (
         <p className="text-sm text-muted-foreground">Envie uma imagem para ajustar o enquadramento.</p>
