@@ -35,7 +35,7 @@ export default async function ProdutoDetalhePage({
     supabase
       .from("produto")
       .select(
-        "id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, gratuita, para_todos, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo)), categorias:produto_categoria_produto(categoria_id)",
+        "id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, gratuita, para_todos, agrupador, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo)), categorias:produto_categoria_produto(categoria_id)",
       )
       .eq("id", produtoId)
       .maybeSingle(),
@@ -164,6 +164,10 @@ export default async function ProdutoDetalhePage({
               <input type="checkbox" name="para_todos" defaultChecked={produto.para_todos} className="size-4 accent-primary" />
               Disponibilizar para todos os alunos
             </label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" name="agrupador" defaultChecked={produto.agrupador} className="size-4 accent-primary" />
+              Produto agrupador (sequência de matérias)
+            </label>
             <div className="sm:col-span-2">
               <SubmitButton size="sm">Salvar produto</SubmitButton>
             </div>
@@ -234,6 +238,11 @@ export default async function ProdutoDetalhePage({
       <Card>
         <CardHeader>
           <CardTitle>Matérias</CardTitle>
+          {produto.agrupador ? (
+            <p className="text-sm text-muted-foreground">
+              Ordem das matérias que o aluno estuda ao matricular esta sequência (produto agrupador).
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-4 px-0">
           <div className="overflow-x-auto">

@@ -97,6 +97,10 @@ export function FormularioNovoProduto({
               <input type="checkbox" name="para_todos" className="size-4 accent-primary" />
               Disponibilizar para todos os alunos
             </label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" name="agrupador" className="size-4 accent-primary" />
+              Produto agrupador (sequência de matérias)
+            </label>
             <div className="sm:col-span-2">
               <SubmitButton size="sm">Criar produto</SubmitButton>
             </div>

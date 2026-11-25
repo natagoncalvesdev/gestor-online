@@ -35,10 +35,15 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
   const descricao = String(formData.get("descricao") ?? "").trim();
   const carga = Number(formData.get("carga_horaria") ?? 0);
   const nota = Number(formData.get("nota_minima") ?? 7);
+  const validadeInformada = String(formData.get("validade_dias") ?? "").trim();
+  const validadeDias = validadeInformada === "" ? null : Number(validadeInformada);
   const ativa = formData.get("ativo") === "on";
 
   if (!nome || !codigo) return { error: "Informe o nome e o código da matéria." };
   if (Number.isNaN(nota) || nota < 0 || nota > 10) return { error: "A nota mínima fica entre 0 e 10." };
+  if (validadeDias != null && (!Number.isInteger(validadeDias) || validadeDias < 1)) {
+    return { error: "Informe a validade em dias inteiros, como 90." };
+  }
 
   const payload = {
     nome,
@@ -46,6 +51,7 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
     descricao,
     carga_horaria: Number.isFinite(carga) ? carga : 0,
     nota_minima: nota,
+    validade_dias: validadeDias,
     ativo: ativa,
   };
 
@@ -687,6 +693,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
   const ativo = formData.get("ativo") === "on";
   const gratuita = formData.get("gratuita") === "on";
   const paraTodos = formData.get("para_todos") === "on";
+  const agrupador = formData.get("agrupador") === "on";
   const precoPromocional = promocionalInformado === "" ? null : Number(promocionalInformado);
 
   if (!nome) return { error: "Informe o nome do produto." };
@@ -716,6 +723,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     ativo,
     gratuita,
     para_todos: paraTodos,
+    agrupador,
   };
   if (!payload.slug) return { error: "Não foi possível gerar o SKU do produto." };
 

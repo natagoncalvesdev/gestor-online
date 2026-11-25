@@ -1,5 +1,5 @@
 export type InternoPapel = "admin" | "secretaria";
-export type MateriaAcesso = "bloqueada" | "liberada" | "concluida";
+export type MateriaAcesso = "bloqueada" | "liberada" | "concluida" | "desmatriculada";
 
 export type UsuarioInterno = {
   id: string;

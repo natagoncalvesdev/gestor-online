@@ -10,7 +10,7 @@ export async function acessoMateria(materiaId: string, matriculaInformada?: stri
     .from("matricula_materia")
     .select("status, matricula_id, materia:materia_id(nome), matricula:matricula_id(aluno_id, produto:produto_id(nome))")
     .eq("materia_id", materiaId)
-    .neq("status", "bloqueada");
+    .in("status", ["liberada", "concluida"]);
 
   const abertos = (acessos ?? []).filter((item) => {
     const matricula = um(

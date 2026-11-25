@@ -50,7 +50,7 @@ export default async function QuestionarioPage({
 
   return (
     <PlayerCurso
-      produtoNome={acesso.produtoNome}
+      voltarRotulo={acesso.materiaNome}
       voltar={acesso.voltar}
       titulo={questionario.titulo}
       rodape={<NavegacaoPasso voltar={acesso.voltar} anterior={anterior} seguinte={seguinte} />}

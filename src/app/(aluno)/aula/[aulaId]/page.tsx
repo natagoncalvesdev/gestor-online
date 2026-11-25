@@ -65,7 +65,7 @@ export default async function AulaPage({
         </div>
       ) : null}
       <PlayerCurso
-        produtoNome={acesso.produtoNome}
+        voltarRotulo={acesso.materiaNome}
         voltar={acesso.voltar}
         titulo={aula.titulo}
         rodape={

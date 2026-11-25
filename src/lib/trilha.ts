@@ -194,6 +194,20 @@ export function resumoProgresso(passos: PassoTrilha[]) {
   };
 }
 
+/** Lista a trilha sem links nem acesso (ex.: matéria ainda aguardando liberação na matrícula). */
+export function passosApenasVisualizacao(passos: PassoTrilha[]): PassoTrilha[] {
+  return passos.map((passo) =>
+    passo.tipo === "secao"
+      ? passo
+      : {
+          ...passo,
+          aberta: false,
+          href: null,
+          quando: "Aguardando liberação da matéria",
+        },
+  );
+}
+
 export function proximoPasso(passos: PassoTrilha[]) {
   const lista = passosContaveis(passos);
   return lista.find((passo) => !passo.concluida && passo.aberta) ?? lista.find((passo) => !passo.concluida) ?? null;

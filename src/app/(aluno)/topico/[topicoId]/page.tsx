@@ -56,7 +56,7 @@ export default async function TopicoPage({
 
   return (
     <PlayerCurso
-      produtoNome={acesso.produtoNome}
+      voltarRotulo={acesso.materiaNome}
       voltar={acesso.voltar}
       titulo={topico.titulo}
       rodape={

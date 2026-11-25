@@ -1,0 +1,1 @@
+alter table produto add column if not exists agrupador boolean not null default false;

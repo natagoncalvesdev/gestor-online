@@ -32,7 +32,7 @@ export function AppShell({
       </aside>
       {alinhar === "esquerda" ? (
         <div className="min-h-screen min-w-0">
-          <main className="w-full max-w-[1200px] p-4 lg:p-6">{children}</main>
+          <main className="w-full max-w-[min(100%,1440px)] p-4 lg:p-6">{children}</main>
         </div>
       ) : (
         <main className="mx-auto w-full max-w-[1200px] p-4 lg:p-6">{children}</main>

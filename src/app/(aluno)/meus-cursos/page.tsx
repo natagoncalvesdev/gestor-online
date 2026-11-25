@@ -4,22 +4,29 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAluno } from "@/lib/session";
 import { PageTitle } from "@/components/page-title";
 import { CapaProduto } from "@/components/loja/capa-produto";
-import { urlImagemProduto } from "@/lib/produto-imagem";
+import { capasDasMaterias } from "@/lib/materia-capa";
 import type { ProdutoCategoriaLinha } from "@/lib/produto-categoria";
+import { formatDate } from "@/lib/format";
 import { lista, um } from "@/lib/relacao";
 
 type MateriaProgresso = { total: number; feitas: number };
 
-type CursoLista = {
-  id: string;
+type MateriaLista = {
+  chave: string;
+  produtoId: string;
+  matriculaId: string | null;
+  materiaId: string;
   nome: string;
-  href: string | null;
+  produtoNome: string;
+  href: string;
   capa: string | null;
   zoom: number;
   x: number;
   y: number;
-  materiaIds: string[];
   ordem: number;
+  ordemMateria: number;
+  expiracao: string | null;
+  status: "bloqueada" | "liberada" | "concluida";
 };
 
 function raizDaCategoria(categorias: ProdutoCategoriaLinha[], id: string) {
@@ -33,20 +40,16 @@ function raizDaCategoria(categorias: ProdutoCategoriaLinha[], id: string) {
   return atual ?? null;
 }
 
-function compararCurso(a: CursoLista, b: CursoLista) {
-  return a.ordem - b.ordem || a.nome.localeCompare(b.nome, "pt-BR");
+function compararMateria(a: MateriaLista, b: MateriaLista) {
+  return (
+    a.ordem - b.ordem ||
+    a.ordemMateria - b.ordemMateria ||
+    a.nome.localeCompare(b.nome, "pt-BR")
+  );
 }
 
-function somarProgresso(ids: string[], porMateria: Map<string, MateriaProgresso>) {
-  return ids.reduce(
-    (acc, id) => {
-      const item = porMateria.get(id);
-      acc.total += item?.total ?? 0;
-      acc.feitas += item?.feitas ?? 0;
-      return acc;
-    },
-    { total: 0, feitas: 0 },
-  );
+function progressoDaMateria(materiaId: string, porMateria: Map<string, MateriaProgresso>) {
+  return porMateria.get(materiaId) ?? { total: 0, feitas: 0 };
 }
 
 export default async function MeusCursosPage() {
@@ -56,7 +59,9 @@ export default async function MeusCursosPage() {
   const leitura = admin ?? supabase;
   const { data } = await supabase
     .from("matricula")
-    .select("id, status, produto:produto_id(id, nome, ordem, imagem_path, imagem_zoom, imagem_x, imagem_y), materias:matricula_materia(ordem, status, materia_id)")
+    .select(
+      "id, status, data_criacao, produto:produto_id(id, nome, ordem), materias:matricula_materia(ordem, status, materia_id, data_expiracao, materia:materia_id(nome))",
+    )
     .eq("aluno_id", session.user.id)
     .neq("status", "cancelada")
     .order("data_criacao", { ascending: false });
@@ -65,60 +70,103 @@ export default async function MeusCursosPage() {
   const { data: abertos } = admin
     ? await admin
         .from("produto")
-        .select("id, nome, ordem, imagem_path, imagem_zoom, imagem_x, imagem_y, materias:produto_materia(ordem, materia_id)")
+        .select("id, nome, ordem, materias:produto_materia(ordem, materia_id, materia:materia_id(nome))")
         .eq("para_todos", true)
         .eq("ativo", true)
         .order("ordem")
     : { data: [] };
 
-  const cursos: CursoLista[] = [];
+  const materiasLista: MateriaLista[] = [];
   const idsMatricula = new Set<string>();
 
   for (const matricula of matriculas) {
     const produto = um(
       matricula.produto as
-        | { id: string; nome: string; ordem: number; imagem_path: string | null; imagem_zoom: number; imagem_x: number; imagem_y: number }
-        | { id: string; nome: string; ordem: number; imagem_path: string | null; imagem_zoom: number; imagem_x: number; imagem_y: number }[]
+        | { id: string; nome: string; ordem: number }
+        | { id: string; nome: string; ordem: number }[]
         | null,
     );
     if (!produto) continue;
     idsMatricula.add(produto.id);
     const materias = lista(
-      matricula.materias as { ordem: number; status: "bloqueada" | "liberada" | "concluida"; materia_id: string }[],
-    ).sort((a, b) => a.ordem - b.ordem);
-    const aberta = materias.find((linha) => linha.status !== "bloqueada") ?? materias[0];
-    cursos.push({
-      id: produto.id,
-      nome: produto.nome,
-      href: aberta ? `/meus-cursos/${matricula.id}/${aberta.materia_id}` : null,
-      capa: urlImagemProduto(produto.imagem_path),
-      zoom: Number(produto.imagem_zoom ?? 1),
-      x: Number(produto.imagem_x ?? 0),
-      y: Number(produto.imagem_y ?? 0),
-      materiaIds: materias.map((linha) => linha.materia_id),
-      ordem: Number(produto.ordem ?? 0),
-    });
+      matricula.materias as {
+        ordem: number;
+        status: "bloqueada" | "liberada" | "concluida" | "desmatriculada";
+        materia_id: string;
+        data_expiracao: string | null;
+        materia: { nome: string } | { nome: string }[] | null;
+      }[],
+    )
+      .filter((linha) => linha.status !== "desmatriculada")
+      .sort((a, b) => a.ordem - b.ordem);
+
+    for (const linha of materias) {
+      const materia = um(linha.materia);
+      const nomeMateria = materia?.nome?.trim() || produto.nome;
+      materiasLista.push({
+        chave: `${matricula.id}-${linha.materia_id}`,
+        produtoId: produto.id,
+        matriculaId: matricula.id,
+        materiaId: linha.materia_id,
+        nome: nomeMateria,
+        produtoNome: produto.nome,
+        href: `/meus-cursos/${matricula.id}/${linha.materia_id}`,
+        capa: null,
+        zoom: 1,
+        x: 0,
+        y: 0,
+        ordem: Number(produto.ordem ?? 0),
+        ordemMateria: linha.ordem,
+        expiracao: linha.data_expiracao,
+        status: linha.status === "concluida" ? "concluida" : linha.status === "liberada" ? "liberada" : "bloqueada",
+      });
+    }
   }
 
   for (const produto of abertos ?? []) {
     if (idsMatricula.has(produto.id)) continue;
-    const materias = lista(produto.materias as { ordem: number; materia_id: string }[] | null).sort((a, b) => a.ordem - b.ordem);
-    const primeira = materias[0];
-    cursos.push({
-      id: produto.id,
-      nome: produto.nome,
-      href: primeira ? `/meus-cursos/aberto/${primeira.materia_id}` : null,
-      capa: urlImagemProduto(produto.imagem_path),
-      zoom: Number(produto.imagem_zoom ?? 1),
-      x: Number(produto.imagem_x ?? 0),
-      y: Number(produto.imagem_y ?? 0),
-      materiaIds: materias.map((linha) => linha.materia_id),
-      ordem: Number(produto.ordem ?? 0),
-    });
+    const materias = lista(
+      produto.materias as {
+        ordem: number;
+        materia_id: string;
+        materia: { nome: string } | { nome: string }[] | null;
+      }[] | null,
+    ).sort((a, b) => a.ordem - b.ordem);
+    for (const linha of materias) {
+      const materia = um(linha.materia);
+      const nomeMateria = materia?.nome?.trim() || produto.nome;
+        materiasLista.push({
+          chave: `aberto-${linha.materia_id}`,
+          produtoId: produto.id,
+          matriculaId: null,
+          materiaId: linha.materia_id,
+          nome: nomeMateria,
+          produtoNome: produto.nome,
+          href: `/meus-cursos/aberto/${linha.materia_id}`,
+          capa: null,
+          zoom: 1,
+          x: 0,
+          y: 0,
+          ordem: Number(produto.ordem ?? 0),
+          ordemMateria: linha.ordem,
+          expiracao: null,
+          status: "liberada",
+      });
+    }
   }
 
-  const produtoIds = cursos.map((curso) => curso.id);
-  const materiaIds = [...new Set(cursos.flatMap((curso) => curso.materiaIds))];
+  const produtoIds = [...new Set(materiasLista.map((item) => item.produtoId))];
+  const materiaIds = [...new Set(materiasLista.map((item) => item.materiaId))];
+  const capasPorMateria = await capasDasMaterias(leitura, materiaIds);
+  for (const item of materiasLista) {
+    const capa = capasPorMateria.get(item.materiaId);
+    if (capa) {
+      item.capa = capa.capa;
+      item.zoom = capa.zoom;
+      item.x = capa.x;
+      item.y = capa.y;
+    }
+  }
   const [{ data: categorias }, { data: vinculos }] = await Promise.all([
     leitura.from("produto_categoria").select("id, nome, slug, descricao, pai_id, ordem, ativo").eq("ativo", true).order("ordem"),
     produtoIds.length
@@ -134,43 +182,43 @@ export default async function MeusCursosPage() {
   }
 
   const porMateria = await progressoDasMaterias(leitura, supabase, session.user.id, materiaIds);
-  const grupos = new Map<string, { categoria: ProdutoCategoriaLinha; cursos: CursoLista[] }>();
-  const semCategoria: CursoLista[] = [];
+  const grupos = new Map<string, { categoria: ProdutoCategoriaLinha; materias: MateriaLista[] }>();
+  const semCategoria: MateriaLista[] = [];
 
-  for (const curso of cursos) {
+  for (const item of materiasLista) {
     const raizes = new Map<string, ProdutoCategoriaLinha>();
-    for (const categoriaId of categoriasPorProduto.get(curso.id) ?? []) {
+    for (const categoriaId of categoriasPorProduto.get(item.produtoId) ?? []) {
       const raiz = raizDaCategoria(linhasCategoria, categoriaId);
       if (!raiz || raiz.slug === "sem-categoria") continue;
       raizes.set(raiz.id, raiz);
     }
     if (raizes.size === 0) {
-      semCategoria.push(curso);
+      semCategoria.push(item);
       continue;
     }
     for (const raiz of raizes.values()) {
-      const grupo = grupos.get(raiz.id) ?? { categoria: raiz, cursos: [] };
-      grupo.cursos.push(curso);
+      const grupo = grupos.get(raiz.id) ?? { categoria: raiz, materias: [] };
+      grupo.materias.push(item);
       grupos.set(raiz.id, grupo);
     }
   }
 
   const secoes = [...grupos.values()]
     .sort((a, b) => a.categoria.ordem - b.categoria.ordem || a.categoria.nome.localeCompare(b.categoria.nome, "pt-BR"))
-    .map((secao) => ({ ...secao, cursos: [...secao.cursos].sort(compararCurso) }));
+    .map((secao) => ({ ...secao, materias: [...secao.materias].sort(compararMateria) }));
   if (semCategoria.length > 0) {
     secoes.push({
       categoria: { id: "outros", nome: "Outros", slug: "outros", descricao: "", pai_id: null, ordem: 999, ativo: true },
-      cursos: [...semCategoria].sort(compararCurso),
+      materias: [...semCategoria].sort(compararMateria),
     });
   }
 
   return (
     <div>
       <PageTitle title="Meus cursos" />
-      {cursos.length === 0 ? (
+      {materiasLista.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Nenhum curso liberado ainda. <Link href="/loja">Ver a loja</Link>.
+          Nenhuma matéria matriculada ainda. <Link href="/loja">Ver a loja</Link>.
         </p>
       ) : (
         <div className="flex flex-col gap-10">
@@ -178,21 +226,37 @@ export default async function MeusCursosPage() {
             <section key={secao.categoria.id}>
               <h2 className="mb-4 text-xl font-semibold">{secao.categoria.nome}</h2>
               <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-                {secao.cursos.map((curso) => {
-                  const progresso = somarProgresso(curso.materiaIds, porMateria);
+                {secao.materias.map((item) => {
+                  const progresso = progressoDaMateria(item.materiaId, porMateria);
                   const percentual = progresso.total === 0 ? 0 : Math.round((progresso.feitas / progresso.total) * 100);
-                  const corpo = (
-                    <>
+                  const rotuloStatus =
+                    item.status === "concluida"
+                      ? "Concluída"
+                      : item.status === "bloqueada"
+                        ? "Aguardando liberação"
+                        : null;
+                  return (
+                    <Link
+                      key={`${secao.categoria.id}-${item.chave}`}
+                      href={item.href}
+                      className="group flex flex-col rounded-2xl border bg-card p-3 shadow-sm"
+                    >
                       <div className="overflow-hidden rounded-xl">
                         <div className="transition-transform duration-300 group-hover:scale-110">
-                          {curso.capa ? (
-                            <CapaProduto src={curso.capa} zoom={curso.zoom} x={curso.x} y={curso.y} proporcao="aspect-square w-full" />
+                          {item.capa ? (
+                            <CapaProduto src={item.capa} zoom={item.zoom} x={item.x} y={item.y} proporcao="aspect-square w-full" />
                           ) : (
                             <div className="aspect-square w-full bg-secondary" />
                           )}
                         </div>
                       </div>
-                      <h3 className="mt-3 line-clamp-2 min-h-12 text-base font-semibold leading-snug">{curso.nome}</h3>
+                      <h3 className="mt-3 line-clamp-2 text-base font-semibold leading-snug">{item.nome}</h3>
+                      {item.produtoNome !== item.nome ? (
+                        <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">{item.produtoNome}</p>
+                      ) : null}
+                      {rotuloStatus ? (
+                        <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{rotuloStatus}</p>
+                      ) : null}
                       <div className="mt-3 flex items-center gap-3">
                         <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-secondary">
                           <div className="h-full rounded-full bg-primary" style={{ width: `${percentual}%` }} />
@@ -202,19 +266,13 @@ export default async function MeusCursosPage() {
                       <p className="mt-2 text-sm font-semibold">
                         {progresso.feitas} de {progresso.total} etapas concluídas
                       </p>
-                      <span className={`mt-4 inline-flex h-10 items-center justify-center rounded-md text-sm font-semibold ${curso.href ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"}`}>
-                        Ver Curso
+                      {item.status !== "bloqueada" && item.expiracao ? (
+                        <p className="mt-1 text-sm text-muted-foreground">Válido até {formatDate(item.expiracao)}</p>
+                      ) : null}
+                      <span className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
+                        Acessar matéria
                       </span>
-                    </>
-                  );
-                  return curso.href ? (
-                    <Link key={`${secao.categoria.id}-${curso.id}`} href={curso.href} className="group flex flex-col rounded-2xl border bg-card p-3 shadow-sm">
-                      {corpo}
                     </Link>
-                  ) : (
-                    <article key={`${secao.categoria.id}-${curso.id}`} className="flex flex-col rounded-2xl border bg-card p-3 shadow-sm">
-                      {corpo}
-                    </article>
                   );
                 })}
               </div>
