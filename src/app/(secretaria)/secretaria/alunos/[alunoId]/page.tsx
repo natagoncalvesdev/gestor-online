@@ -43,7 +43,7 @@ export default async function AlunoDetalhePage({
   if (!alunoBruto) notFound();
   const aluno = mesclarAlunoEndereco(alunoBruto);
 
-  const [{ data: matriculas }, { data: documentos }, { data: cursos }, { data: observacoes }, { data: pedidos }, { data: aulas }, { data: progresso }, { data: tentativas }] =
+  const [{ data: matriculas }, { data: documentos }, { data: cursos }, { data: observacoes }, { data: pedidos }, { data: aulas }, { data: topicos }, { data: questionarios }, { data: progresso }, { data: progressoTopico }, { data: tentativas }] =
     await Promise.all([
       supabase
         .from("matricula")
@@ -67,10 +67,13 @@ export default async function AlunoDetalhePage({
         .eq("aluno_id", alunoId)
         .order("data_criacao", { ascending: false }),
       supabase.from("aula").select("id, materia_id"),
+      supabase.from("topico").select("id, aula:aula_id(materia_id)"),
+      supabase.from("questionario").select("id, materia_id"),
       supabase.from("aula_progresso").select("aula_id, video_concluido").eq("aluno_id", alunoId),
+      supabase.from("topico_progresso").select("topico_id, video_concluido").eq("aluno_id", alunoId),
       supabase
         .from("tentativa_prova")
-        .select("matricula_id, data_criacao")
+        .select("matricula_id, questionario_id, aprovado, data_criacao")
         .eq("aluno_id", alunoId)
         .order("data_criacao", { ascending: false }),
     ]);
@@ -81,7 +84,25 @@ export default async function AlunoDetalhePage({
     listaAulas.push(aula.id);
     aulasPorMateria.set(aula.materia_id, listaAulas);
   }
+  const topicosPorMateria = new Map<string, string[]>();
+  for (const topico of topicos ?? []) {
+    const aula = um(topico.aula as { materia_id: string } | { materia_id: string }[] | null);
+    if (!aula) continue;
+    const listaTopicos = topicosPorMateria.get(aula.materia_id) ?? [];
+    listaTopicos.push(topico.id);
+    topicosPorMateria.set(aula.materia_id, listaTopicos);
+  }
+  const quizzesPorMateria = new Map<string, string[]>();
+  for (const questionario of questionarios ?? []) {
+    const listaQuizzes = quizzesPorMateria.get(questionario.materia_id) ?? [];
+    listaQuizzes.push(questionario.id);
+    quizzesPorMateria.set(questionario.materia_id, listaQuizzes);
+  }
   const vistas = new Set((progresso ?? []).filter((item) => item.video_concluido).map((item) => item.aula_id));
+  const topicosVistos = new Set((progressoTopico ?? []).filter((item) => item.video_concluido).map((item) => item.topico_id));
+  const quizzesAprovados = new Set(
+    (tentativas ?? []).filter((item) => item.aprovado && item.questionario_id).map((item) => item.questionario_id as string)
+  );
   const telefone = String(aluno.telefone ?? "");
   const digitos = telefone.replace(/\D/g, "");
   const whatsapp = digitos ? `https://wa.me/55${digitos}` : null;
@@ -105,8 +126,12 @@ export default async function AlunoDetalhePage({
     let total = 0;
     for (const materia of materias) {
       const ids = aulasPorMateria.get(materia.materia_id) ?? [];
-      total += ids.length;
+      const idsTopico = topicosPorMateria.get(materia.materia_id) ?? [];
+      const idsQuiz = quizzesPorMateria.get(materia.materia_id) ?? [];
+      total += ids.length + idsTopico.length + idsQuiz.length;
       feitas += ids.filter((id) => vistas.has(id)).length;
+      feitas += idsTopico.filter((id) => topicosVistos.has(id)).length;
+      feitas += idsQuiz.filter((id) => quizzesAprovados.has(id)).length;
     }
     const status = matricula.status as LinhaCursoAluno["status"];
     const encerrado = status === "concluida";

@@ -32,8 +32,8 @@ export function CarrosselBanners({ banners, compacto = false }: { banners: Banne
   const faixa = banners.length > 1 ? [...banners, ...banners].slice(0, banners.length + janela) : banners;
 
   return (
-    <section className={compacto ? "bg-[#f7f4ef] px-4 py-3" : "bg-[#f7f4ef] px-4 py-6"}>
-      <div className={`mx-auto overflow-hidden ${compacto ? "max-w-3xl" : "max-w-6xl"}`}>
+    <section className={compacto ? "bg-background px-2 py-2" : "bg-[#f7f4ef] px-4 py-6"}>
+      <div className={`mx-auto overflow-hidden ${compacto ? "w-full" : "max-w-6xl"}`}>
         <div
           className="flex gap-3 transition-transform duration-500"
           style={{ transform: `translateX(calc(${passo} * -1 * (${largura} + 0.75rem)))` }}

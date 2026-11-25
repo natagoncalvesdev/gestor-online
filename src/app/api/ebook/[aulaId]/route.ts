@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { produtoAbertoDaMateria } from "@/lib/produto-aberto";
 import { getSession } from "@/lib/session";
 
 export async function GET(
@@ -21,22 +22,25 @@ export async function GET(
   if (!aula?.epub_path) return new NextResponse("Livro não encontrado", { status: 404 });
 
   if (session.type === "aluno") {
-    const { data: matriculas } = await admin
-      .from("matricula")
-      .select("id")
-      .eq("aluno_id", session.user.id)
-      .neq("status", "cancelada");
-    const ids = (matriculas ?? []).map((item) => item.id);
-    const { data: acesso } = ids.length
-      ? await admin
-          .from("matricula_materia")
-          .select("id")
-          .eq("materia_id", aula.materia_id)
-          .in("matricula_id", ids)
-          .in("status", ["liberada", "concluida"])
-          .limit(1)
-      : { data: [] };
-    if (!acesso?.length) return new NextResponse("Sem acesso", { status: 403 });
+    const aberta = Boolean(await produtoAbertoDaMateria(admin, aula.materia_id));
+    if (!aberta) {
+      const { data: matriculas } = await admin
+        .from("matricula")
+        .select("id")
+        .eq("aluno_id", session.user.id)
+        .neq("status", "cancelada");
+      const ids = (matriculas ?? []).map((item) => item.id);
+      const { data: acesso } = ids.length
+        ? await admin
+            .from("matricula_materia")
+            .select("id")
+            .eq("materia_id", aula.materia_id)
+            .in("matricula_id", ids)
+            .in("status", ["liberada", "concluida"])
+            .limit(1)
+        : { data: [] };
+      if (!acesso?.length) return new NextResponse("Sem acesso", { status: 403 });
+    }
   }
 
   const { data, error } = await admin.storage.from("ebooks").download(aula.epub_path);

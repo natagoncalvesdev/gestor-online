@@ -139,34 +139,54 @@ export async function marcarAulaVista(_prev: FormState, formData: FormData): Pro
   const session = await getSession();
   if (!session || session.type !== "aluno") return { error: "Entre com a conta de aluno." };
   const aulaId = String(formData.get("aula_id") ?? "");
+  const topicoId = String(formData.get("topico_id") ?? "");
   const supabase = await createClient();
-  const { error } = await supabase.from("aula_progresso").upsert({
-    aluno_id: session.user.id,
-    aula_id: aulaId,
-    video_concluido: true,
-    atualizado_em: new Date().toISOString(),
-  });
+  const { error } = topicoId
+    ? await supabase.from("topico_progresso").upsert({
+        aluno_id: session.user.id,
+        topico_id: topicoId,
+        video_concluido: true,
+        atualizado_em: new Date().toISOString(),
+      })
+    : await supabase.from("aula_progresso").upsert({
+        aluno_id: session.user.id,
+        aula_id: aulaId,
+        video_concluido: true,
+        atualizado_em: new Date().toISOString(),
+      });
   if (error) return { error: error.message };
   const matriculaId = String(formData.get("matricula_id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
-  revalidatePath(`/aula/${aulaId}`);
+  if (aulaId) revalidatePath(`/aula/${aulaId}`);
+  if (topicoId) revalidatePath(`/topico/${topicoId}`);
   if (matriculaId && materiaId) revalidatePath(`/meus-cursos/${matriculaId}/${materiaId}`);
-  return { ok: "Aula marcada como assistida." };
+  if (materiaId) revalidatePath(`/meus-cursos/aberto/${materiaId}`);
+  return { ok: topicoId ? "Tópico marcado como concluído." : "Aula marcada como assistida." };
 }
 
 export async function salvarProgressoEbook(_prev: FormState, formData: FormData): Promise<FormState> {
   const session = await getSession();
   if (!session || session.type !== "aluno") return null;
   const aulaId = String(formData.get("aula_id") ?? "");
+  const topicoId = String(formData.get("topico_id") ?? "");
   const cfi = String(formData.get("cfi") ?? "");
-  if (!cfi) return null;
+  if (!cfi || (!aulaId && !topicoId)) return null;
   const supabase = await createClient();
-  await supabase.from("aula_progresso").upsert({
-    aluno_id: session.user.id,
-    aula_id: aulaId,
-    ebook_cfi: cfi,
-    atualizado_em: new Date().toISOString(),
-  });
+  if (topicoId) {
+    await supabase.from("topico_progresso").upsert({
+      aluno_id: session.user.id,
+      topico_id: topicoId,
+      ebook_cfi: cfi,
+      atualizado_em: new Date().toISOString(),
+    });
+  } else {
+    await supabase.from("aula_progresso").upsert({
+      aluno_id: session.user.id,
+      aula_id: aulaId,
+      ebook_cfi: cfi,
+      atualizado_em: new Date().toISOString(),
+    });
+  }
   return null;
 }
 
@@ -174,6 +194,7 @@ export async function enviarProva(_prev: FormState, formData: FormData): Promise
   const session = await getSession();
   if (!session || session.type !== "aluno") return { error: "Entre com a conta de aluno." };
   const materiaId = String(formData.get("materia_id") ?? "");
+  const questionarioId = String(formData.get("questionario_id") ?? "") || null;
   const respostas: { questao_id: string; alternativa_id: string }[] = [];
   for (const [chave, valor] of formData.entries()) {
     if (chave.startsWith("questao_") && typeof valor === "string" && valor) {
@@ -185,18 +206,28 @@ export async function enviarProva(_prev: FormState, formData: FormData): Promise
   const { data, error } = await supabase.rpc("submeter_prova", {
     p_materia_id: materiaId,
     p_respostas: respostas,
+    p_questionario_id: questionarioId,
   });
   if (error) {
     if (error.message.includes("sem questoes")) return { error: "Esta matéria ainda não tem prova." };
     return { error: "Não foi possível registrar a prova." };
   }
 
-  const resultado = data as { nota: number; aprovado: boolean; acertos: number; total: number };
+  const resultado = data as { nota: number; aprovado: boolean; acertos: number; total: number; encerra?: boolean };
   revalidatePath("/meus-cursos");
   revalidatePath(`/prova/${materiaId}`);
+  if (questionarioId) revalidatePath(`/questionario/${questionarioId}`);
+  const nota = `Nota ${resultado.nota} (${resultado.acertos} de ${resultado.total}).`;
+  if (resultado.encerra === false) {
+    return {
+      ok: resultado.aprovado
+        ? `${nota} Questionário concluído.`
+        : `${nota} Você pode tentar de novo.`,
+    };
+  }
   return {
     ok: resultado.aprovado
-      ? `Aprovado com nota ${resultado.nota} (${resultado.acertos} de ${resultado.total}). A próxima matéria foi liberada se ainda havia vaga.`
-      : `Nota ${resultado.nota} (${resultado.acertos} de ${resultado.total}). A matéria continua aberta para uma nova tentativa.`,
+      ? `Aprovado com ${nota} A próxima matéria foi liberada se ainda havia vaga.`
+      : `${nota} A matéria continua aberta para uma nova tentativa.`,
   };
 }

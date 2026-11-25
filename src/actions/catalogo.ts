@@ -16,6 +16,10 @@ function dbMessage(error: { code?: string; message: string }) {
   return error.message;
 }
 
+function htmlConteudo(valor: string) {
+  return valor.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "").trim();
+}
+
 async function storageAdmin() {
   const admin = createServiceRoleClient();
   if (!admin) return { admin: null, error: "Configure a service role para enviar arquivos." };
@@ -32,8 +36,6 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
   const carga = Number(formData.get("carga_horaria") ?? 0);
   const nota = Number(formData.get("nota_minima") ?? 7);
   const ativa = formData.get("ativo") === "on";
-  const gratuita = formData.get("gratuita") === "on";
-  const paraTodos = formData.get("para_todos") === "on";
 
   if (!nome || !codigo) return { error: "Informe o nome e o código da matéria." };
   if (Number.isNaN(nota) || nota < 0 || nota > 10) return { error: "A nota mínima fica entre 0 e 10." };
@@ -45,8 +47,6 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
     carga_horaria: Number.isFinite(carga) ? carga : 0,
     nota_minima: nota,
     ativo: ativa,
-    gratuita,
-    para_todos: paraTodos,
   };
 
   let ordem = 1;
@@ -71,15 +71,21 @@ export async function salvarAula(_prev: FormState, formData: FormData): Promise<
   const id = String(formData.get("id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
   const titulo = String(formData.get("titulo") ?? "").trim();
+  const ordemInformada = formData.has("ordem");
   const ordem = Number(formData.get("ordem") ?? 1);
   const video = String(formData.get("bunny_video_id") ?? "").trim();
   const youtube = idYoutube(video);
   const topicoInformado = formData.has("topico_id");
   const topicoId = String(formData.get("topico_id") ?? "").trim() || null;
+  const conteudoInformado = formData.has("conteudo");
   const file = formData.get("epub");
 
   if (!titulo || !materiaId) return { error: "Informe o título da aula." };
-  if (!Number.isFinite(ordem) || ordem < 1) return { error: "A ordem começa em 1." };
+  if (ordemInformada && (!Number.isFinite(ordem) || ordem < 1)) return { error: "A ordem começa em 1." };
+  const extras = {
+    ...(ordemInformada || !id ? { ordem: ordemInformada ? ordem : 1 } : {}),
+    ...(conteudoInformado ? { conteudo: htmlConteudo(String(formData.get("conteudo") ?? "")) } : {}),
+  };
 
   let epubPath: string | undefined;
   let epubNome: string | undefined;
@@ -104,13 +110,13 @@ export async function salvarAula(_prev: FormState, formData: FormData): Promise<
       id: aulaId,
       materia_id: materiaId,
       titulo,
-      ordem,
       bunny_video_id: youtube ? null : video || null,
       youtube_id: youtube,
       ...(topicoInformado ? { topico_id: topicoId } : {}),
       libera_em: horarioBrasilia(String(formData.get("libera_em") ?? "")),
       epub_path: epubPath,
       epub_nome: epubNome,
+      ...extras,
     };
     const { error: saveError } = id
       ? await supabase.from("aula").update(payload).eq("id", id)
@@ -120,11 +126,11 @@ export async function salvarAula(_prev: FormState, formData: FormData): Promise<
     const payload = {
       materia_id: materiaId,
       titulo,
-      ordem,
       bunny_video_id: youtube ? null : video || null,
       youtube_id: youtube,
       ...(topicoInformado ? { topico_id: topicoId } : {}),
       libera_em: horarioBrasilia(String(formData.get("libera_em") ?? "")),
+      ...extras,
     };
     const { error: saveError } = id
       ? await supabase.from("aula").update(payload).eq("id", id)
@@ -155,6 +161,7 @@ export async function excluirAula(_prev: FormState, formData: FormData): Promise
 export async function adicionarArquivoAula(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireAdmin();
   const aulaId = String(formData.get("aula_id") ?? "");
+  const topicoId = String(formData.get("topico_id") ?? "") || null;
   const materiaId = String(formData.get("materia_id") ?? "");
   const modo = String(formData.get("modo") ?? "");
   const visualizar = modo === "visualizar" || modo === "ambos";
@@ -177,6 +184,7 @@ export async function adicionarArquivoAula(_prev: FormState, formData: FormData)
   if (uploadError) return { error: uploadError.message };
   const { error } = await supabase.from("aula_arquivo").insert({
     aula_id: aulaId,
+    topico_id: topicoId,
     nome: nomeFinal,
     path,
     mime: arquivo.type || "application/octet-stream",
@@ -212,13 +220,14 @@ export async function clonarAula(_prev: FormState, formData: FormData): Promise<
   const supabase = await createClient();
   const id = String(formData.get("id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
-  const { data: aula } = await supabase.from("aula").select("titulo, topico_id, bunny_video_id, youtube_id, libera_em, posicao").eq("id", id).maybeSingle();
+  const { data: aula } = await supabase.from("aula").select("titulo, conteudo, topico_id, bunny_video_id, youtube_id, libera_em, posicao").eq("id", id).maybeSingle();
   if (!aula) return { error: "Aula não encontrada." };
   const { data: ultima } = await supabase.from("aula").select("ordem").eq("materia_id", materiaId).order("ordem", { ascending: false }).limit(1).maybeSingle();
   const origem = Number(aula.posicao ?? 0);
-  const [{ data: aulasDepois }, { data: topicosDepois }] = await Promise.all([
+  const [{ data: aulasDepois }, { data: topicosDepois }, { data: quizzesDepois }] = await Promise.all([
     supabase.from("aula").select("id, posicao").eq("materia_id", materiaId).gt("posicao", origem),
     supabase.from("aula_topico").select("id, posicao").eq("materia_id", materiaId).gt("posicao", origem),
+    supabase.from("questionario").select("id, posicao").eq("materia_id", materiaId).is("aula_id", null).gt("posicao", origem),
   ]);
   for (const item of aulasDepois ?? []) {
     await supabase.from("aula").update({ posicao: Number(item.posicao) + 1 }).eq("id", item.id);
@@ -226,9 +235,13 @@ export async function clonarAula(_prev: FormState, formData: FormData): Promise<
   for (const item of topicosDepois ?? []) {
     await supabase.from("aula_topico").update({ posicao: Number(item.posicao) + 1 }).eq("id", item.id);
   }
+  for (const item of quizzesDepois ?? []) {
+    await supabase.from("questionario").update({ posicao: Number(item.posicao) + 1 }).eq("id", item.id);
+  }
   const { data: copia, error } = await supabase.from("aula").insert({
     materia_id: materiaId,
     titulo: `${aula.titulo} (cópia)`,
+    conteudo: aula.conteudo ?? "",
     ordem: Number(ultima?.ordem ?? 0) + 1,
     topico_id: aula.topico_id,
     posicao: origem + 1,
@@ -252,13 +265,25 @@ export async function salvarTopico(_prev: FormState, formData: FormData): Promis
   const { count } = await supabase.from("aula_topico").select("id", { count: "exact", head: true }).eq("materia_id", materiaId);
   const { error } = await supabase.from("aula_topico").insert({
     materia_id: materiaId,
-    titulo: `Tópico ${(count ?? 0) + 1}`,
+    titulo: `Seção ${(count ?? 0) + 1}`,
     ordem: (count ?? 0) + 1,
-    posicao: await proximaPosicao(supabase, materiaId),
+    posicao: await reservarPosicao(supabase, materiaId),
   });
   if (error) return { error: dbMessage(error) };
   revalidatePath(`/secretaria/materias/${materiaId}`);
-  return { ok: "Tópico criado." };
+  return { ok: "Seção criada." };
+}
+
+export async function renomearSecao(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const titulo = String(formData.get("titulo") ?? "").trim();
+  if (!titulo) return { error: "Informe o nome da seção." };
+  const { error } = await supabase.from("aula_topico").update({ titulo }).eq("id", String(formData.get("id") ?? ""));
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Seção atualizada." };
 }
 
 export async function criarAula(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -279,19 +304,39 @@ export async function criarAula(_prev: FormState, formData: FormData): Promise<F
     titulo: `Aula ${numero}`,
     ordem: numero,
     topico_id: topico?.id ?? null,
-    posicao: await proximaPosicao(supabase, materiaId),
+    posicao: await reservarPosicao(supabase, materiaId),
   });
   if (error) return { error: dbMessage(error) };
   revalidatePath(`/secretaria/materias/${materiaId}`);
   return { ok: "Aula criada." };
 }
 
-async function proximaPosicao(supabase: Awaited<ReturnType<typeof createClient>>, materiaId: string) {
-  const [{ data: aula }, { data: topico }] = await Promise.all([
-    supabase.from("aula").select("posicao").eq("materia_id", materiaId).order("posicao", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("aula_topico").select("posicao").eq("materia_id", materiaId).order("posicao", { ascending: false }).limit(1).maybeSingle(),
+async function reservarPosicao(supabase: Awaited<ReturnType<typeof createClient>>, materiaId: string) {
+  const [{ data: aulas }, { data: secoes }, { data: quizzes }] = await Promise.all([
+    supabase.from("aula").select("posicao").eq("materia_id", materiaId),
+    supabase.from("aula_topico").select("posicao").eq("materia_id", materiaId),
+    supabase.from("questionario").select("id, posicao, encerra_materia").eq("materia_id", materiaId).is("aula_id", null),
   ]);
-  return Math.max(Number(aula?.posicao ?? 0), Number(topico?.posicao ?? 0)) + 1;
+  const posicoes = [
+    ...(aulas ?? []).map((item) => Number(item.posicao ?? 0)),
+    ...(secoes ?? []).map((item) => Number(item.posicao ?? 0)),
+    ...(quizzes ?? []).map((item) => Number(item.posicao ?? 0)),
+  ];
+  const maior = Math.max(0, ...posicoes);
+  const prova = (quizzes ?? []).find((item) => item.encerra_materia && Number(item.posicao) === maior);
+  if (prova) {
+    await supabase.from("questionario").update({ posicao: maior + 1 }).eq("id", prova.id);
+    return maior;
+  }
+  return maior + 1;
+}
+
+async function reservarPosicaoFilha(supabase: Awaited<ReturnType<typeof createClient>>, aulaId: string) {
+  const [{ data: topico }, { data: quiz }] = await Promise.all([
+    supabase.from("topico").select("posicao").eq("aula_id", aulaId).order("posicao", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("questionario").select("posicao").eq("aula_id", aulaId).order("posicao", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  return Math.max(Number(topico?.posicao ?? 0), Number(quiz?.posicao ?? 0)) + 1;
 }
 
 export async function excluirTopico(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -301,16 +346,22 @@ export async function excluirTopico(_prev: FormState, formData: FormData): Promi
   const { error } = await supabase.from("aula_topico").delete().eq("id", String(formData.get("id") ?? ""));
   if (error) return { error: dbMessage(error) };
   revalidatePath(`/secretaria/materias/${materiaId}`);
-  return { ok: "Tópico removido. As aulas continuam na matéria." };
+  return { ok: "Seção removida. As aulas continuam na matéria." };
 }
 
 export async function salvarQuestao(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireAdmin();
   const supabase = await createClient();
-  const materiaId = String(formData.get("materia_id") ?? "");
+  const questionarioId = String(formData.get("questionario_id") ?? "");
+  let materiaId = String(formData.get("materia_id") ?? "");
   const enunciado = String(formData.get("enunciado") ?? "").trim();
   const ordem = Number(formData.get("ordem") ?? 1);
   const correta = String(formData.get("correta") ?? "");
+  if (questionarioId) {
+    const { data: questionario } = await supabase.from("questionario").select("materia_id").eq("id", questionarioId).maybeSingle();
+    if (!questionario) return { error: "Questionário não encontrado." };
+    materiaId = questionario.materia_id as string;
+  }
 
   const alternativas = [1, 2, 3, 4]
     .map((n) => ({ ordem: n, texto: String(formData.get(`alt_${n}`) ?? "").trim() }))
@@ -324,7 +375,7 @@ export async function salvarQuestao(_prev: FormState, formData: FormData): Promi
 
   const { data: questao, error } = await supabase
     .from("questao")
-    .insert({ materia_id: materiaId, enunciado, ordem })
+    .insert({ materia_id: materiaId, questionario_id: questionarioId || null, enunciado, ordem })
     .select("id")
     .single();
   if (error || !questao) return { error: error ? dbMessage(error) : "Não foi possível salvar a questão." };
@@ -422,26 +473,183 @@ export async function reordenarProdutos(produtoIds: string[]): Promise<{ ok: tru
 
 export async function reordenarConteudo(
   materiaId: string,
-  itens: { tipo: "topico" | "aula"; id: string }[]
+  itens: { tipo: "secao" | "topico" | "aula" | "questionario"; id: string }[]
 ): Promise<{ ok: true } | { error: string }> {
   await requireAdmin();
   const supabase = await createClient();
-  let topicoAtual: string | null = null;
+  let secaoAtual: string | null = null;
   for (let indice = 0; indice < itens.length; indice += 1) {
     const item = itens[indice];
     const posicao = indice + 1;
-    if (item.tipo === "topico") {
-      topicoAtual = item.id;
-      const { error } = await supabase.from("aula_topico").update({ posicao, ordem: posicao }).eq("id", item.id);
+    if (item.tipo === "secao" || item.tipo === "topico") {
+      secaoAtual = item.id;
+      const { error } = await supabase.from("aula_topico").update({ posicao }).eq("id", item.id);
+      if (error) return { error: dbMessage(error) };
+    } else if (item.tipo === "questionario") {
+      const { error } = await supabase.from("questionario").update({ posicao, aula_id: null }).eq("id", item.id);
       if (error) return { error: dbMessage(error) };
     } else {
-      const { error } = await supabase.from("aula").update({ posicao, ordem: posicao, topico_id: topicoAtual }).eq("id", item.id);
+      const { error } = await supabase.from("aula").update({ posicao, topico_id: secaoAtual }).eq("id", item.id);
       if (error) return { error: dbMessage(error) };
     }
   }
   revalidatePath(`/secretaria/materias/${materiaId}`);
   revalidatePath("/meus-cursos", "layout");
   return { ok: true };
+}
+
+export async function reordenarFilhos(
+  materiaId: string,
+  aulaId: string,
+  itens: { tipo: "topico" | "questionario"; id: string }[]
+): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { data: topicosAtuais } = await supabase.from("topico").select("id, posicao").eq("aula_id", aulaId);
+  for (const topico of topicosAtuais ?? []) {
+    const { error } = await supabase.from("topico").update({ posicao: Number(topico.posicao) + 100000 }).eq("id", topico.id);
+    if (error) return { error: dbMessage(error) };
+  }
+  for (let indice = 0; indice < itens.length; indice += 1) {
+    const item = itens[indice];
+    const posicao = indice + 1;
+    const { error } =
+      item.tipo === "topico"
+        ? await supabase.from("topico").update({ posicao, aula_id: aulaId }).eq("id", item.id)
+        : await supabase.from("questionario").update({ posicao, aula_id: aulaId }).eq("id", item.id);
+    if (error) return { error: dbMessage(error) };
+  }
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  revalidatePath("/meus-cursos", "layout");
+  return { ok: true };
+}
+
+export async function criarTopicoAula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const aulaId = String(formData.get("aula_id") ?? "");
+  const { count } = await supabase.from("topico").select("id", { count: "exact", head: true }).eq("aula_id", aulaId);
+  const { error } = await supabase.from("topico").insert({
+    aula_id: aulaId,
+    titulo: `Tópico ${(count ?? 0) + 1}`,
+    posicao: await reservarPosicaoFilha(supabase, aulaId),
+  });
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Tópico criado." };
+}
+
+export async function salvarTopicoAula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const titulo = String(formData.get("titulo") ?? "").trim();
+  const video = String(formData.get("bunny_video_id") ?? "").trim();
+  const youtube = idYoutube(video);
+  const file = formData.get("epub");
+  if (!titulo) return { error: "Informe o título do tópico." };
+
+  const payload: Record<string, string | null> = {
+    titulo,
+    conteudo: htmlConteudo(String(formData.get("conteudo") ?? "")),
+    bunny_video_id: youtube ? null : video || null,
+    youtube_id: youtube,
+    libera_em: horarioBrasilia(String(formData.get("libera_em") ?? "")),
+  };
+
+  if (file instanceof File && file.size > 0) {
+    if (!file.name.toLowerCase().endsWith(".epub")) return { error: "O livro digital precisa ser um arquivo EPUB." };
+    const { admin, error } = await storageAdmin();
+    if (!admin) return { error: error ?? "Upload indisponível." };
+    const epubPath = `${materiaId}/topico-${id}.epub`;
+    const { error: uploadError } = await admin.storage.from("ebooks").upload(epubPath, Buffer.from(await file.arrayBuffer()), {
+      contentType: "application/epub+zip",
+      upsert: true,
+    });
+    if (uploadError) return { error: uploadError.message };
+    payload.epub_path = epubPath;
+    payload.epub_nome = file.name;
+  }
+
+  const { error: saveError } = await supabase.from("topico").update(payload).eq("id", id);
+  if (saveError) return { error: dbMessage(saveError) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  revalidatePath(`/topico/${id}`);
+  return { ok: "Tópico salvo." };
+}
+
+export async function excluirTopicoAula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const epubPath = String(formData.get("epub_path") ?? "");
+  const { data: arquivos } = await supabase.from("aula_arquivo").select("path").eq("topico_id", id);
+  const { error } = await supabase.from("topico").delete().eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  const admin = createServiceRoleClient();
+  const paths = [epubPath, ...(arquivos ?? []).map((arquivo) => arquivo.path)].filter(Boolean);
+  if (paths.length && admin) await admin.storage.from("ebooks").remove(paths);
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Tópico excluído." };
+}
+
+export async function criarQuestionario(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const aulaId = String(formData.get("aula_id") ?? "") || null;
+  const { count } = await supabase
+    .from("questionario")
+    .select("id", { count: "exact", head: true })
+    .eq("materia_id", materiaId)
+    .eq("encerra_materia", true);
+  const encerra = !aulaId && (count ?? 0) === 0;
+  const { error } = await supabase.from("questionario").insert({
+    materia_id: materiaId,
+    aula_id: aulaId,
+    titulo: aulaId ? "Questionário" : "Prova",
+    posicao: aulaId ? await reservarPosicaoFilha(supabase, aulaId) : await reservarPosicao(supabase, materiaId),
+    encerra_materia: encerra,
+  });
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Questionário criado." };
+}
+
+export async function salvarQuestionario(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const titulo = String(formData.get("titulo") ?? "").trim();
+  const notaInformada = String(formData.get("nota_minima") ?? "").trim();
+  const encerra = formData.get("encerra_materia") === "on";
+  if (!titulo) return { error: "Informe o título do questionário." };
+  let nota: number | null = null;
+  if (notaInformada) {
+    nota = Number(notaInformada);
+    if (Number.isNaN(nota) || nota < 0 || nota > 10) return { error: "A nota mínima fica entre 0 e 10." };
+  }
+  if (encerra) {
+    await supabase.from("questionario").update({ encerra_materia: false }).eq("materia_id", materiaId).neq("id", id);
+  }
+  const { error } = await supabase.from("questionario").update({ titulo, nota_minima: nota, encerra_materia: encerra }).eq("id", id);
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Questionário salvo." };
+}
+
+export async function excluirQuestionario(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const { error } = await supabase.from("questionario").delete().eq("id", String(formData.get("id") ?? ""));
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: "Questionário excluído." };
 }
 
 export async function removerMateriaProduto(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -477,6 +685,8 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
   const limite = Number(formData.get("materias_simultaneas") ?? 1);
   const categoriaIds = formData.getAll("categorias").map((valor) => String(valor)).filter(Boolean);
   const ativo = formData.get("ativo") === "on";
+  const gratuita = formData.get("gratuita") === "on";
+  const paraTodos = formData.get("para_todos") === "on";
   const precoPromocional = promocionalInformado === "" ? null : Number(promocionalInformado);
 
   if (!nome) return { error: "Informe o nome do produto." };
@@ -504,8 +714,10 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     altura_cm: altura,
     materias_simultaneas: limite,
     ativo,
+    gratuita,
+    para_todos: paraTodos,
   };
-  if (!payload.slug) return { error: "Não foi possível gerar o endereço do produto." };
+  if (!payload.slug) return { error: "Não foi possível gerar o SKU do produto." };
 
   let ordem = 1;
   if (!id) {
@@ -515,7 +727,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
 
   if (id) {
     const { error } = await supabase.from("produto").update(payload).eq("id", id);
-    if (error) return { error: dbMessage(error) };
+    if (error) return { error: error.code === "23505" ? "Já existe um produto com este SKU." : dbMessage(error) };
     const sync = await sincronizarCategoriasDoProduto(supabase, id, categoriaIds);
     if ("error" in sync) return { error: sync.error };
     revalidatePath("/secretaria/produtos");
@@ -526,7 +738,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
   }
 
   const { data: criado, error } = await supabase.from("produto").insert({ ...payload, ordem }).select("id").single();
-  if (error || !criado) return { error: error ? dbMessage(error) : "Não foi possível criar o produto." };
+  if (error || !criado) return { error: error ? (error.code === "23505" ? "Já existe um produto com este SKU." : dbMessage(error)) : "Não foi possível criar o produto." };
   const sync = await sincronizarCategoriasDoProduto(supabase, criado.id, categoriaIds);
   if ("error" in sync) return { error: sync.error };
   revalidatePath("/secretaria/produtos");
@@ -576,38 +788,56 @@ async function sincronizarCapaProduto(
 export async function salvarImagemProduto(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireAdmin();
   const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
   const produtoId = String(formData.get("produto_id") ?? "");
-  const imagem = formData.get("imagem");
-  if (!(imagem instanceof File) || imagem.size === 0) return { error: "Escolha uma imagem." };
-  if (!imagem.type.startsWith("image/")) return { error: "A imagem precisa ser JPG, PNG ou WebP." };
-  if (imagem.size > 8 * 1024 * 1024) return { error: "A imagem pode ter até 8 MB." };
-  const { admin, error: storageError } = await storageAdmin();
-  if (!admin) return { error: storageError ?? "Upload indisponível." };
-  const extensao = imagem.type === "image/png" ? "png" : imagem.type === "image/webp" ? "webp" : "jpg";
-  const path = `${produtoId}/${Date.now()}.${extensao}`;
-  const { error: uploadError } = await admin.storage.from("produtos").upload(path, Buffer.from(await imagem.arrayBuffer()), {
-    contentType: imagem.type,
-    upsert: true,
-  });
-  if (uploadError) return { error: uploadError.message };
-  const { count } = await supabase.from("produto_imagem").select("id", { count: "exact", head: true }).eq("produto_id", produtoId);
+  const arquivo = formData.get("imagem");
+  const imagem = arquivo instanceof File && arquivo.size > 0 ? arquivo : null;
+  if (!id && !imagem) return { error: "Escolha uma imagem." };
+  if (imagem && !imagem.type.startsWith("image/")) return { error: "A imagem precisa ser JPG, PNG ou WebP." };
+  if (imagem && imagem.size > 8 * 1024 * 1024) return { error: "A imagem pode ter até 8 MB." };
+
+  let path: string | null = null;
+  if (imagem) {
+    const { admin, error: storageError } = await storageAdmin();
+    if (!admin) return { error: storageError ?? "Upload indisponível." };
+    const extensao = imagem.type === "image/png" ? "png" : imagem.type === "image/webp" ? "webp" : "jpg";
+    path = `${produtoId}/${Date.now()}.${extensao}`;
+    const { error: uploadError } = await admin.storage.from("produtos").upload(path, Buffer.from(await imagem.arrayBuffer()), {
+      contentType: imagem.type,
+      upsert: true,
+    });
+    if (uploadError) return { error: uploadError.message };
+  }
+
   const zoom = Math.min(3, Math.max(1, Number(formData.get("imagem_zoom") ?? 1) || 1));
   const x = Math.min(80, Math.max(-80, Number(formData.get("imagem_x") ?? 0) || 0));
   const y = Math.min(80, Math.max(-80, Number(formData.get("imagem_y") ?? 0) || 0));
-  const { error } = await supabase.from("produto_imagem").insert({
-    produto_id: produtoId,
-    path,
-    ordem: (count ?? 0) + 1,
-    imagem_zoom: zoom,
-    imagem_x: x,
-    imagem_y: y,
-  });
-  if (error) return { error: dbMessage(error) };
+  const enquadramento = { imagem_zoom: zoom, imagem_x: x, imagem_y: y };
+
+  if (id) {
+    const { error } = await supabase
+      .from("produto_imagem")
+      .update(path ? { ...enquadramento, path } : enquadramento)
+      .eq("id", id);
+    if (error) return { error: dbMessage(error) };
+  } else if (path) {
+    const { count } = await supabase.from("produto_imagem").select("id", { count: "exact", head: true }).eq("produto_id", produtoId);
+    const { error } = await supabase.from("produto_imagem").insert({
+      produto_id: produtoId,
+      path,
+      ordem: (count ?? 0) + 1,
+      ...enquadramento,
+    });
+    if (error) return { error: dbMessage(error) };
+  } else {
+    return { error: "Escolha uma imagem." };
+  }
+
   await sincronizarCapaProduto(supabase, produtoId);
   revalidatePath(`/secretaria/produtos/${produtoId}`);
   revalidatePath("/loja", "layout");
   revalidatePath("/meus-cursos", "layout");
-  return { ok: "Imagem adicionada." };
+  return { ok: id ? "Imagem atualizada." : "Imagem adicionada." };
 }
 
 export async function excluirImagemProduto(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -627,21 +857,20 @@ export async function excluirImagemProduto(_prev: FormState, formData: FormData)
 export async function salvarInfoProduto(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireAdmin();
   const supabase = await createClient();
+  const id = String(formData.get("id") ?? "");
   const produtoId = String(formData.get("produto_id") ?? "");
   const nome = String(formData.get("nome") ?? "").trim();
   const valor = String(formData.get("valor") ?? "").trim();
   const ordem = Number(formData.get("ordem") ?? 1);
   if (!nome) return { error: "Informe o nome do campo." };
-  const { error } = await supabase.from("produto_info").insert({
-    produto_id: produtoId,
-    nome,
-    valor,
-    ordem,
-  });
+  const payload = { nome, valor, ordem };
+  const { error } = id
+    ? await supabase.from("produto_info").update(payload).eq("id", id)
+    : await supabase.from("produto_info").insert({ ...payload, produto_id: produtoId });
   if (error) return { error: dbMessage(error) };
   revalidatePath(`/secretaria/produtos/${produtoId}`);
   revalidatePath("/loja", "layout");
-  return { ok: "Informação adicionada." };
+  return { ok: id ? "Informação atualizada." : "Informação adicionada." };
 }
 
 export async function excluirInfoProduto(_prev: FormState, formData: FormData): Promise<FormState> {

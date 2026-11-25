@@ -10,24 +10,33 @@ export function ActionForm({
   action,
   children,
   className,
+  id,
+  onSuccess,
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   children: React.ReactNode;
   className?: string;
+  id?: string;
+  onSuccess?: () => void;
 }) {
   const [state, formAction] = useActionState(action, null);
   const aviso = useRef(0);
+  const aoSucesso = useRef(onSuccess);
+  aoSucesso.current = onSuccess;
 
   useEffect(() => {
     if (!state?.error && !state?.ok) return;
     aviso.current += 1;
     const marca = aviso.current;
     if (state.error) toast.error(state.error, { id: `form-erro-${marca}` });
-    if (state.ok) toast.success(state.ok, { id: `form-ok-${marca}` });
+    if (state.ok) {
+      toast.success(state.ok, { id: `form-ok-${marca}` });
+      aoSucesso.current?.();
+    }
   }, [state]);
 
   return (
-    <form action={formAction} className={className}>
+    <form id={id} action={formAction} className={className}>
       {children}
     </form>
   );

@@ -3,25 +3,38 @@
 import { useEffect, useState } from "react";
 import { GripVertical } from "lucide-react";
 import { toast } from "sonner";
-import { adicionarArquivoAula, clonarAula, excluirArquivoAula, excluirAula, excluirTopico, reordenarConteudo, salvarAula } from "@/actions/catalogo";
+import { adicionarArquivoAula, clonarAula, criarQuestionario, excluirArquivoAula, excluirAula, excluirTopico, reordenarConteudo, renomearSecao, salvarAula } from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
+import { CartaoQuestionario, type QuestaoAdmin } from "@/components/secretaria/cartao-questionario";
+import { EditorApresentacao } from "@/components/secretaria/editor-apresentacao";
+import { FilhosAula, type QuestionarioFilho, type TopicoAdmin } from "@/components/secretaria/filhos-aula";
 import { SubmitButton } from "@/components/submit-button";
 import { Field, Input, Select } from "@/components/ui/field";
 
 export type ArquivoAula = { id: string; nome: string; visualizar: boolean; baixar: boolean };
 
 export type ItemSequencia =
-  | { tipo: "topico"; id: string; titulo: string }
+  | { tipo: "secao"; id: string; titulo: string }
   | {
       tipo: "aula";
       id: string;
       titulo: string;
-      ordem: number;
+      conteudo: string;
       video: string;
       liberaEm: string;
       epubNome: string | null;
       epubPath: string | null;
       arquivos: ArquivoAula[];
+      topicos: TopicoAdmin[];
+      questionarios: QuestionarioFilho[];
+    }
+  | {
+      tipo: "questionario";
+      id: string;
+      titulo: string;
+      encerra: boolean;
+      notaMinima: string;
+      questoes: QuestaoAdmin[];
     };
 
 export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens: ItemSequencia[] }) {
@@ -40,6 +53,7 @@ export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens:
     const origem = lista.findIndex((item) => item.id === origemId);
     const destino = lista.findIndex((item) => item.id === destinoId);
     if (origem < 0 || destino < 0) return;
+    const anterior = lista;
     const proxima = [...lista];
     const [item] = proxima.splice(origem, 1);
     proxima.splice(destino, 0, item);
@@ -48,33 +62,64 @@ export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens:
       materiaId,
       proxima.map((linha) => ({ tipo: linha.tipo, id: linha.id }))
     );
-    if ("error" in resultado) toast.error(resultado.error);
+    if ("error" in resultado) {
+      setLista(anterior);
+      toast.error(resultado.error);
+    }
   }
+
+  let dentroDaSecao = false;
+  const linhas = lista.map((item) => {
+    if (item.tipo === "secao") dentroDaSecao = true;
+    return { item, recuo: item.tipo !== "secao" && dentroDaSecao };
+  });
 
   return (
     <div className="space-y-3">
-      {lista.map((item) => (
+      {linhas.map(({ item, recuo }) => (
         <div
           key={`${item.tipo}:${item.id}`}
-          className={arrastando === item.id ? "opacity-60" : ""}
+          className={[recuo ? "ml-12" : "", arrastando === item.id ? "opacity-60" : ""].filter(Boolean).join(" ")}
           onDragOver={(evento) => evento.preventDefault()}
           onDrop={() => void soltar(item.id)}
         >
-          {item.tipo === "topico" ? (
+          {item.tipo === "secao" ? (
             <div className="flex items-center gap-2 rounded-md bg-secondary px-3 py-2">
               <Alca arrastar={() => setArrastando(item.id)} soltarAlca={() => setArrastando(null)} nome={item.titulo} />
-              <p className="min-w-0 flex-1 font-semibold">{item.titulo}</p>
+              <ActionForm action={renomearSecao} className="flex min-w-0 flex-1 items-center gap-2">
+                <input type="hidden" name="id" value={item.id} />
+                <input type="hidden" name="materia_id" value={materiaId} />
+                <Input name="titulo" defaultValue={item.titulo} required />
+                <SubmitButton size="sm">Salvar</SubmitButton>
+              </ActionForm>
               <ActionForm action={excluirTopico}>
                 <input type="hidden" name="id" value={item.id} />
                 <input type="hidden" name="materia_id" value={materiaId} />
                 <SubmitButton variant="ghost" size="sm">Remover</SubmitButton>
               </ActionForm>
             </div>
+          ) : item.tipo === "questionario" ? (
+            <details className="rounded-xl border bg-card">
+              <summary className="flex cursor-pointer items-center gap-2 px-3 py-3 text-sm font-medium">
+                <Alca arrastar={() => setArrastando(item.id)} soltarAlca={() => setArrastando(null)} nome={item.titulo} />
+                <span className="min-w-0 flex-1 truncate">Questionário · {item.titulo}</span>
+              </summary>
+              <div className="border-t px-4 py-4">
+                <CartaoQuestionario
+                  materiaId={materiaId}
+                  id={item.id}
+                  titulo={item.titulo}
+                  encerra={item.encerra}
+                  notaMinima={item.notaMinima}
+                  questoes={item.questoes}
+                />
+              </div>
+            </details>
           ) : (
             <details className="rounded-xl border bg-card">
               <summary className="flex cursor-pointer items-center gap-2 px-3 py-3 text-sm font-medium">
                 <Alca arrastar={() => setArrastando(item.id)} soltarAlca={() => setArrastando(null)} nome={item.titulo} />
-                <span className="min-w-0 flex-1 truncate">{item.ordem}. {item.titulo}</span>
+                <span className="min-w-0 flex-1 truncate">{item.titulo}</span>
               </summary>
               <div className="space-y-3 border-t px-4 py-4">
                 <ActionForm action={salvarAula} className="grid gap-3">
@@ -83,6 +128,7 @@ export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens:
                   <Field label="Título">
                     <Input name="titulo" defaultValue={item.titulo} required />
                   </Field>
+                  <EditorApresentacao name="conteudo" valorInicial={item.conteudo} compacto dica="Texto da lição, exibido acima dos arquivos." />
                   <Field label="Disponível em (data e hora de Brasília)">
                     <Input name="libera_em" type="datetime-local" defaultValue={item.liberaEm} />
                   </Field>
@@ -129,6 +175,7 @@ export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens:
                     <SubmitButton size="sm">Adicionar</SubmitButton>
                   </ActionForm>
                 </div>
+                <FilhosAula materiaId={materiaId} aulaId={item.id} topicos={item.topicos} questionarios={item.questionarios} />
                 <div className="flex gap-2">
                   <ActionForm action={clonarAula}>
                     <input type="hidden" name="id" value={item.id} />
@@ -147,6 +194,10 @@ export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens:
           )}
         </div>
       ))}
+      <ActionForm action={criarQuestionario}>
+        <input type="hidden" name="materia_id" value={materiaId} />
+        <SubmitButton size="sm" variant="outline">Novo questionário na matéria</SubmitButton>
+      </ActionForm>
     </div>
   );
 }

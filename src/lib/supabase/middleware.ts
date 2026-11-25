@@ -30,6 +30,8 @@ function isAlunoApp(pathname: string) {
   return (
     pathname.startsWith("/meus-cursos") ||
     pathname.startsWith("/aula") ||
+    pathname.startsWith("/topico") ||
+    pathname.startsWith("/questionario") ||
     pathname.startsWith("/prova") ||
     pathname.startsWith("/pedidos") ||
     pathname.startsWith("/perfil") ||

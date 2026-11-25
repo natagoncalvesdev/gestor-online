@@ -7,9 +7,13 @@ import { Button } from "@/components/ui/button";
 export function EpubReader({
   aulaId,
   cfiInicial,
+  url,
+  campo = "aula_id",
 }: {
   aulaId: string;
   cfiInicial: string | null;
+  url?: string;
+  campo?: "aula_id" | "topico_id";
 }) {
   const caixa = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<{ next: () => Promise<void>; prev: () => Promise<void> } | null>(null);
@@ -21,7 +25,7 @@ export function EpubReader({
 
     async function abrir() {
       const ePub = (await import("epubjs")).default;
-      const resposta = await fetch(`/api/ebook/${aulaId}`);
+      const resposta = await fetch(url ?? `/api/ebook/${aulaId}`);
       if (!resposta.ok) {
         setErro("Não foi possível abrir o livro.");
         return;
@@ -35,7 +39,7 @@ export function EpubReader({
       await rendition.display(cfiInicial || undefined);
       rendition.on("relocated", (local) => {
         const dados = new FormData();
-        dados.set("aula_id", aulaId);
+        dados.set(campo, aulaId);
         dados.set("cfi", local.start.cfi);
         void salvarProgressoEbook(null, dados);
       });
@@ -46,7 +50,7 @@ export function EpubReader({
       ativo = false;
       destruir();
     };
-  }, [aulaId, cfiInicial]);
+  }, [aulaId, cfiInicial, url, campo]);
 
   if (erro) return <p className="text-sm text-red-700">{erro}</p>;
 

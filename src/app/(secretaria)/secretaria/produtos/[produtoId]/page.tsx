@@ -2,27 +2,23 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   adicionarMateriaProduto,
-  excluirImagemProduto,
-  excluirInfoProduto,
-  excluirVariacao,
   salvarImagemProduto,
   salvarInfoProduto,
   salvarProduto,
-  salvarVariacao,
 } from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
 import { CopiarLinkProduto } from "@/components/secretaria/copiar-link-produto";
 import { ExcluirProduto } from "@/components/secretaria/excluir-produto";
+import { LinhaInfoProduto } from "@/components/secretaria/linha-info-produto";
 import { MateriasCursoOrdem } from "@/components/secretaria/materias-curso-ordem";
 import { SubmitButton } from "@/components/submit-button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SelecaoCategoriasProduto } from "@/components/secretaria/selecao-categorias-produto";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import type { ProdutoCategoriaLinha } from "@/lib/produto-categoria";
-import { formatBRL } from "@/lib/format";
 import { EditorApresentacao } from "@/components/secretaria/editor-apresentacao";
 import { EnquadramentoImagem } from "@/components/secretaria/enquadramento-imagem";
-import { urlImagemProduto } from "@/lib/produto-imagem";
+import { GaleriaImagensProduto } from "@/components/secretaria/galeria-imagens-produto";
 import { lista, um } from "@/lib/relacao";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/session";
@@ -39,7 +35,7 @@ export default async function ProdutoDetalhePage({
     supabase
       .from("produto")
       .select(
-        "id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), variacoes:produto_variacao(id, nome, preco, ordem, ativo), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo)), categorias:produto_categoria_produto(categoria_id)",
+        "id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, gratuita, para_todos, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo)), categorias:produto_categoria_produto(categoria_id)",
       )
       .eq("id", produtoId)
       .maybeSingle(),
@@ -52,9 +48,6 @@ export default async function ProdutoDetalhePage({
   ]);
   if (!produto) notFound();
 
-  const variacoes = ((produto.variacoes ?? []) as { id: string; nome: string; preco: number; ordem: number; ativo: boolean }[])
-    .slice()
-    .sort((a, b) => a.ordem - b.ordem);
   const infos = ((produto.infos ?? []) as { id: string; nome: string; valor: string; ordem: number }[])
     .slice()
     .sort((a, b) => a.ordem - b.ordem);
@@ -76,11 +69,10 @@ export default async function ProdutoDetalhePage({
     (produto.categorias as { categoria_id: string }[] | null)?.map((linha) => linha.categoria_id) ?? [];
 
   return (
-    <div className="flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full max-w-6xl flex-col gap-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{produto.nome}</h1>
-          <p className="text-sm text-muted-foreground">Preço, peso, medidas e as matérias que este produto libera.</p>
         </div>
         <div className="flex items-center gap-2">
           <CopiarLinkProduto slug={produto.slug} />
@@ -91,41 +83,40 @@ export default async function ProdutoDetalhePage({
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Informações do produto</CardTitle>
-          <CardDescription>Sem matérias, a compra só registra o pedido.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ActionForm action={salvarProduto} className="grid gap-4 sm:grid-cols-2">
-            <input type="hidden" name="id" value={produto.id} />
-            <div className="sm:col-span-2">
-              <Field label="Nome">
-                <Input name="nome" defaultValue={produto.nome} required />
-              </Field>
-            </div>
-            <div className="sm:col-span-2">
-              <SelecaoCategoriasProduto
-                categorias={(categorias ?? []) as ProdutoCategoriaLinha[]}
-                selecionadas={categoriasSelecionadas}
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <p className="mb-1 text-sm font-medium">Descrição curta</p>
-              <EditorApresentacao
-                name="descricao"
-                valorInicial={produto.descricao ?? ""}
-                compacto
-                dica="Aparece ao lado do preço na loja. Negrito, tamanho e listas."
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <p className="mb-1 text-sm font-medium">Texto da loja e do curso</p>
-              <EditorApresentacao
-                valorInicial={produto.apresentacao ?? ""}
-                dica="Selecione o trecho, use negrito, o tamanho ou a lista. Um h2 no texto vira a faixa laranja na loja."
-              />
-            </div>
+      <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <ActionForm id="salvar-produto" action={salvarProduto} className="h-full">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle>Informações do produto</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2">
+              <input type="hidden" name="id" value={produto.id} />
+              <div className="sm:col-span-2">
+                <Field label="Nome">
+                  <Input name="nome" defaultValue={produto.nome} required />
+                </Field>
+              </div>
+            <details className="sm:col-span-2 rounded-md border bg-white">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Descrição curta</summary>
+              <div className="border-t px-3 py-3">
+                <EditorApresentacao
+                  name="descricao"
+                  valorInicial={produto.descricao ?? ""}
+                  compacto
+                  dica="Aparece ao lado do preço na loja. Negrito, tamanho e listas."
+                />
+              </div>
+            </details>
+            <details className="sm:col-span-2 rounded-md border bg-white">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Texto da loja e do curso</summary>
+              <div className="border-t px-3 py-3">
+                <EditorApresentacao
+                  valorInicial={produto.apresentacao ?? ""}
+                  dica="Selecione o trecho, use negrito, o tamanho ou a lista. Um h2 no texto vira a faixa laranja na loja."
+                />
+              </div>
+            </details>
             <div className="grid gap-4 sm:col-span-2 sm:grid-cols-3">
               <Field label="Preço (R$)">
                 <Input name="preco" type="number" min={0} step="0.01" defaultValue={produto.preco} required />
@@ -151,7 +142,7 @@ export default async function ProdutoDetalhePage({
                 <Input name="altura_cm" type="number" min={0} step={1} defaultValue={produto.altura_cm ?? 0} />
               </Field>
             </div>
-            <Field label="Endereço na loja">
+            <Field label="SKU">
               <Input name="slug" defaultValue={produto.slug} />
             </Field>
             <Field label="Matérias abertas ao mesmo tempo">
@@ -161,67 +152,69 @@ export default async function ProdutoDetalhePage({
                 <option value="3">3 matérias por vez</option>
               </Select>
             </Field>
-            <p className="text-sm text-muted-foreground sm:col-span-2">Deixe a data da promoção em branco para ela ficar valendo sem prazo.</p>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input type="checkbox" name="ativo" defaultChecked={produto.ativo} className="size-4 accent-primary" />
               Produto ativo
             </label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" name="gratuita" defaultChecked={produto.gratuita} className="size-4 accent-primary" />
+              Produto gratuito
+            </label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" name="para_todos" defaultChecked={produto.para_todos} className="size-4 accent-primary" />
+              Disponibilizar para todos os alunos
+            </label>
             <div className="sm:col-span-2">
               <SubmitButton size="sm">Salvar produto</SubmitButton>
             </div>
-          </ActionForm>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Imagens do produto</CardTitle>
-          <CardDescription>Várias fotos na loja, com miniaturas e zoom. A primeira é a capa em Meus cursos.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-3">
-            {imagens.map((imagem) => (
-              <div key={imagem.id} className="relative">
-                <img src={urlImagemProduto(imagem.path)!} alt="" className="size-20 rounded-md border object-cover" />
-                <ActionForm action={excluirImagemProduto} className="mt-1">
-                  <input type="hidden" name="id" value={imagem.id} />
-                  <input type="hidden" name="produto_id" value={produto.id} />
-                  <SubmitButton variant="ghost" size="sm" className="h-7 px-2 text-xs">
-                    Remover
-                  </SubmitButton>
-                </ActionForm>
-              </div>
-            ))}
-          </div>
-          <ActionForm action={salvarImagemProduto} className="space-y-3">
-            <input type="hidden" name="produto_id" value={produto.id} />
-            <EnquadramentoImagem url={null} zoomInicial={1} xInicial={0} yInicial={0} />
-            <SubmitButton size="sm">Adicionar imagem</SubmitButton>
-          </ActionForm>
-        </CardContent>
-      </Card>
+            </div>
+          </CardContent>
+        </Card>
+        </ActionForm>
+        <div className="flex h-full min-h-0 flex-col gap-6">
+          <Card className="shrink-0">
+            <CardHeader>
+              <CardTitle>Categorias do produto</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <SelecaoCategoriasProduto
+                categorias={(categorias ?? []) as ProdutoCategoriaLinha[]}
+                selecionadas={categoriasSelecionadas}
+                form="salvar-produto"
+              />
+            </CardContent>
+          </Card>
+          <Card className="min-h-0 flex-1">
+            <CardHeader className="shrink-0">
+              <CardTitle>Imagens do produto</CardTitle>
+            </CardHeader>
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+              <GaleriaImagensProduto produtoId={produto.id} imagens={imagens} />
+              <ActionForm action={salvarImagemProduto} className="space-y-3">
+                <input type="hidden" name="produto_id" value={produto.id} />
+                <EnquadramentoImagem url={null} zoomInicial={1} xInicial={0} yInicial={0} />
+                <SubmitButton size="sm">Adicionar imagem</SubmitButton>
+              </ActionForm>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Informações adicionais</CardTitle>
-          <CardDescription>Nome e valor exibidos na aba da loja, por exemplo matérias, videoaulas ou carga horária.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {infos.map((info) => (
-              <li key={info.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
-                <span>
-                  <strong>{info.nome}</strong>
-                  <span className="text-muted-foreground"> — {info.valor}</span>
-                </span>
-                <ActionForm action={excluirInfoProduto}>
-                  <input type="hidden" name="id" value={info.id} />
-                  <input type="hidden" name="produto_id" value={produto.id} />
-                  <SubmitButton variant="ghost" size="sm">
-                    Excluir
-                  </SubmitButton>
-                </ActionForm>
-              </li>
+              <LinhaInfoProduto
+                key={`${info.id}-${info.nome}-${info.valor}`}
+                id={info.id}
+                produtoId={produto.id}
+                nome={info.nome}
+                valor={info.valor}
+                ordem={info.ordem}
+              />
             ))}
           </ul>
           <ActionForm action={salvarInfoProduto} className="grid gap-3 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
@@ -241,7 +234,6 @@ export default async function ProdutoDetalhePage({
       <Card>
         <CardHeader>
           <CardTitle>Matérias</CardTitle>
-          <CardDescription>Uma matéria vende só ela. Várias matérias formam um grupo, na ordem da fila.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 px-0">
           <div className="overflow-x-auto">
@@ -282,44 +274,6 @@ export default async function ProdutoDetalhePage({
               </Field>
             </div>
             <SubmitButton size="sm">Adicionar</SubmitButton>
-          </ActionForm>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Opções de preço</CardTitle>
-          <CardDescription>Se houver opções, o aluno escolhe uma. Todas liberam as mesmas matérias.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <ul className="space-y-2">
-            {variacoes.map((variacao) => (
-              <li key={variacao.id} className="flex items-center justify-between rounded-md border px-3 py-2">
-                <span>
-                  {variacao.nome} — {formatBRL(variacao.preco)}
-                </span>
-                <ActionForm action={excluirVariacao}>
-                  <input type="hidden" name="id" value={variacao.id} />
-                  <input type="hidden" name="produto_id" value={produto.id} />
-                  <SubmitButton variant="ghost" size="sm">Excluir</SubmitButton>
-                </ActionForm>
-              </li>
-            ))}
-          </ul>
-          <ActionForm action={salvarVariacao} className="grid gap-3 sm:grid-cols-3">
-            <input type="hidden" name="produto_id" value={produto.id} />
-            <Field label="Nome da opção">
-              <Input name="nome" required placeholder="À vista, 10x" />
-            </Field>
-            <Field label="Preço (R$)">
-              <Input name="preco" type="number" min={0} step="0.01" required />
-            </Field>
-            <Field label="Ordem">
-              <Input name="ordem" type="number" min={1} defaultValue={variacoes.length + 1} />
-            </Field>
-            <div className="sm:col-span-3">
-              <SubmitButton size="sm">Adicionar opção</SubmitButton>
-            </div>
           </ActionForm>
         </CardContent>
       </Card>

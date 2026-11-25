@@ -94,9 +94,7 @@ export function EnquadramentoImagem({
           </div>
           <p className="text-xs text-muted-foreground">{dica}</p>
         </>
-      ) : (
-        <p className="text-sm text-muted-foreground">Envie uma imagem para ajustar o enquadramento.</p>
-      )}
+      ) : null}
     </div>
   );
 }

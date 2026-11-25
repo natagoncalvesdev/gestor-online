@@ -20,23 +20,17 @@ export default async function NovaMateriaPage() {
         <Field label="Descrição">
           <Textarea name="descricao" />
         </Field>
-        <Field label="Carga horária">
-          <Input name="carga_horaria" type="number" min={0} defaultValue={0} />
-        </Field>
-        <Field label="Nota mínima da prova">
-          <Input name="nota_minima" type="number" min={0} max={10} step="0.1" defaultValue={7} />
-        </Field>
+        <div className="flex flex-wrap gap-4">
+          <Field label="Carga horária">
+            <Input name="carga_horaria" type="number" min={0} defaultValue={0} className="w-24" />
+          </Field>
+          <Field label="Nota mínima da prova">
+            <Input name="nota_minima" type="number" min={0} max={10} step="0.1" defaultValue={7} className="w-24" />
+          </Field>
+        </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" name="ativo" defaultChecked />
           Matéria ativa
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="gratuita" />
-          Matéria gratuita
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="para_todos" />
-          Disponibilizar para todos os alunos
         </label>
         <SubmitButton>Criar matéria</SubmitButton>
       </ActionForm>

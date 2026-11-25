@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { licaoLiberada } from "@/lib/ebd";
+import { produtoAbertoDaMateria } from "@/lib/produto-aberto";
 import { getSession } from "@/lib/session";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
@@ -20,16 +21,16 @@ export async function GET(request: Request, context: { params: Promise<{ arquivo
   const { arquivoId } = await context.params;
   const { data: arquivo } = await admin
     .from("aula_arquivo")
-    .select("nome, path, mime, visualizar, baixar, aula:aula_id(libera_em, materia_id, materia:materia_id(para_todos, ativo))")
+    .select("nome, path, mime, visualizar, baixar, topico:topico_id(libera_em), aula:aula_id(libera_em, materia_id)")
     .eq("id", arquivoId)
     .maybeSingle();
   const aula = Array.isArray(arquivo?.aula) ? arquivo.aula[0] : arquivo?.aula;
-  const materiaRelacao = aula?.materia;
-  const materia = Array.isArray(materiaRelacao) ? materiaRelacao[0] : materiaRelacao;
+  const topico = Array.isArray(arquivo?.topico) ? arquivo.topico[0] : arquivo?.topico;
   if (!arquivo || !aula) return new NextResponse("Arquivo não encontrado", { status: 404 });
   if (aula.libera_em && !licaoLiberada(aula.libera_em)) return new NextResponse("Aula ainda não disponível", { status: 403 });
+  if (topico?.libera_em && !licaoLiberada(topico.libera_em)) return new NextResponse("Tópico ainda não disponível", { status: 403 });
 
-  const aberta = Boolean(materia?.para_todos && materia.ativo);
+  const aberta = Boolean(await produtoAbertoDaMateria(admin, aula.materia_id));
   if (!aberta) {
     const { data: acessos } = await admin
       .from("matricula_materia")

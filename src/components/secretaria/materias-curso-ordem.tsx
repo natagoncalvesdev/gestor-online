@@ -40,7 +40,7 @@ export function MateriasCursoOrdem({
   if (lista.length === 0) {
     return (
       <tr>
-        <td colSpan={4} className="px-4 py-3 text-muted-foreground">
+        <td colSpan={4} className="px-4 py-1.5 text-muted-foreground">
           Nenhuma matéria. A compra deste produto não abre estudo.
         </td>
       </tr>
@@ -54,7 +54,7 @@ export function MateriasCursoOrdem({
       onDragOver={(evento) => evento.preventDefault()}
       onDrop={() => void soltar(item.id)}
     >
-      <td className="px-4 py-3">
+      <td className="px-4 py-1.5">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -73,13 +73,13 @@ export function MateriasCursoOrdem({
           <span className="tabular-nums text-muted-foreground">{indice + 1}</span>
         </div>
       </td>
-      <td className="px-4 py-3 font-medium">{item.nome}</td>
-      <td className="px-4 py-3 text-muted-foreground">{item.codigo}</td>
-      <td className="px-4 py-3 text-right">
+      <td className="px-4 py-1.5 font-medium">{item.nome}</td>
+      <td className="px-4 py-1.5 text-muted-foreground">{item.codigo}</td>
+      <td className="px-4 py-1.5 text-right">
         <ActionForm action={removerMateriaProduto}>
           <input type="hidden" name="produto_id" value={produtoId} />
           <input type="hidden" name="materia_id" value={item.id} />
-          <SubmitButton variant="ghost" size="sm" className="text-destructive">
+          <SubmitButton variant="ghost" size="sm" className="h-7 text-destructive">
             Remover
           </SubmitButton>
         </ActionForm>
