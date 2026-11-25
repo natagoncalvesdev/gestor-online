@@ -14,10 +14,9 @@ export default async function MateriaAbertaPage({ params }: { params: Promise<{ 
   if (!admin) notFound();
   const { data: materia } = await admin.from("materia").select("id, nome, gratuita").eq("id", materiaId).eq("para_todos", true).eq("ativo", true).maybeSingle();
   if (!materia) notFound();
-  const [{ data: aulas }, { data: topicos }, { data: licoes }] = await Promise.all([
+  const [{ data: aulas }, { data: topicos }] = await Promise.all([
     admin.from("aula").select("id, ordem, titulo, libera_em, topico_id, posicao").eq("materia_id", materia.id).order("posicao"),
     admin.from("aula_topico").select("id, titulo, ordem, posicao").eq("materia_id", materia.id).order("posicao"),
-    admin.from("ebd_licao").select("id, ordem, titulo, libera_em").eq("materia_id", materia.id).order("ordem"),
   ]);
 
   const listaAulas = (aulas ?? []) as AulaLinha[];
@@ -46,37 +45,9 @@ export default async function MateriaAbertaPage({ params }: { params: Promise<{ 
             )
           )}
         </ul>
-      ) : null}
-
-      {(licoes ?? []).length > 0 ? (
-        <ul className="mt-6 divide-y rounded-xl border bg-card">
-          {(licoes ?? []).map((licao) => {
-            const aberta = licaoLiberada(licao.libera_em);
-            const conteudo = (
-              <>
-                <span className="text-sm text-muted-foreground">{licao.ordem}</span>
-                <span className="font-medium">{licao.titulo}</span>
-                <span className="text-sm text-muted-foreground">{aberta ? "Disponível" : textoLiberacao(licao.libera_em)}</span>
-              </>
-            );
-            return (
-              <li key={licao.id}>
-                {aberta ? (
-                  <Link href={`/meus-cursos/aberto/${materia.id}/${licao.id}`} className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 px-4 py-3 hover:bg-secondary">
-                    {conteudo}
-                  </Link>
-                ) : (
-                  <div className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 px-4 py-3 opacity-70">{conteudo}</div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
-
-      {sequencia.length === 0 && (licoes ?? []).length === 0 ? (
+      ) : (
         <p className="mt-6 text-sm text-muted-foreground">Nenhuma aula publicada ainda.</p>
-      ) : null}
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { textoDeHtml } from "@/lib/html-apresentacao";
 import { urlImagemProduto } from "@/lib/produto-imagem";
 import { isSupabaseConfigured } from "@/lib/site";
-import { filtrarPorSecao, listarProdutosLojaAtivos } from "@/lib/loja-catalogo";
+import { filtrarPorSecao, listarCategoriasAtivas, listarProdutosLojaAtivos } from "@/lib/loja-catalogo";
 import { AvisoConfig } from "@/components/page-title";
 import { LojaPortalHero } from "@/components/loja/loja-portal-hero";
 import { LojaDestaqueLivraria } from "@/components/loja/loja-destaque-livraria";
@@ -15,8 +15,8 @@ export default async function LojaPage() {
     );
   }
 
-  const produtos = await listarProdutosLojaAtivos();
-  const livraria = filtrarPorSecao(produtos, "livraria");
+  const [produtos, categorias] = await Promise.all([listarProdutosLojaAtivos(), listarCategoriasAtivas()]);
+  const livraria = filtrarPorSecao(produtos, categorias, "livraria");
 
   return (
     <div className="relative left-1/2 w-screen max-w-[100vw] -translate-x-1/2 overflow-x-hidden">

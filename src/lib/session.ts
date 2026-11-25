@@ -1,3 +1,4 @@
+import { mesclarAlunoEndereco } from "@/lib/aluno-endereco";
 import { createClient } from "@/lib/supabase/server";
 import type { Aluno, Session, UsuarioInterno } from "@/lib/supabase/types";
 import { isSupabaseConfigured } from "@/lib/site";
@@ -23,12 +24,12 @@ export async function getSession(): Promise<Session | null> {
 
   const { data: aluno } = await supabase
     .from("aluno")
-    .select("*")
+    .select("*, endereco_aluno(*)")
     .eq("id", user.id)
     .maybeSingle();
 
   if (aluno) {
-    return { type: "aluno", user: aluno as Aluno };
+    return { type: "aluno", user: mesclarAlunoEndereco(aluno) };
   }
 
   return null;

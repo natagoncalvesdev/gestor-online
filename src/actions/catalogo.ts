@@ -8,6 +8,7 @@ import { requireAdmin } from "@/lib/session";
 import { horarioBrasilia, idYoutube } from "@/lib/ebd";
 import { slugify } from "@/lib/slug";
 import type { FormState } from "@/lib/form-state";
+import { sincronizarCategoriasDoProduto } from "@/actions/produto-categoria";
 
 function dbMessage(error: { code?: string; message: string }) {
   if (error.code === "23505") return "Já existe um registro com estes dados.";
@@ -474,7 +475,7 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
   const largura = Number(formData.get("largura_cm") ?? 0);
   const altura = Number(formData.get("altura_cm") ?? 0);
   const limite = Number(formData.get("materias_simultaneas") ?? 1);
-  const categoria = String(formData.get("categoria") ?? "");
+  const categoriaIds = formData.getAll("categorias").map((valor) => String(valor)).filter(Boolean);
   const ativo = formData.get("ativo") === "on";
   const precoPromocional = promocionalInformado === "" ? null : Number(promocionalInformado);
 
@@ -489,8 +490,6 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     return { error: "Informe as medidas em centímetros, sem casas decimais." };
   }
   if (![1, 2, 3].includes(limite)) return { error: "Escolha 1, 2 ou 3 matérias ao mesmo tempo." };
-  if (!["teologia", "especializacao", "livraria"].includes(categoria)) return { error: "Escolha a categoria do produto." };
-
   const payload = {
     nome,
     slug: slugify(slugInformado || nome),
@@ -504,7 +503,6 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
     largura_cm: largura,
     altura_cm: altura,
     materias_simultaneas: limite,
-    categoria,
     ativo,
   };
   if (!payload.slug) return { error: "Não foi possível gerar o endereço do produto." };
@@ -518,6 +516,8 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
   if (id) {
     const { error } = await supabase.from("produto").update(payload).eq("id", id);
     if (error) return { error: dbMessage(error) };
+    const sync = await sincronizarCategoriasDoProduto(supabase, id, categoriaIds);
+    if ("error" in sync) return { error: sync.error };
     revalidatePath("/secretaria/produtos");
     revalidatePath(`/secretaria/produtos/${id}`);
     revalidatePath("/loja", "layout");
@@ -527,6 +527,8 @@ export async function salvarProduto(_prev: FormState, formData: FormData): Promi
 
   const { data: criado, error } = await supabase.from("produto").insert({ ...payload, ordem }).select("id").single();
   if (error || !criado) return { error: error ? dbMessage(error) : "Não foi possível criar o produto." };
+  const sync = await sincronizarCategoriasDoProduto(supabase, criado.id, categoriaIds);
+  if ("error" in sync) return { error: sync.error };
   revalidatePath("/secretaria/produtos");
   revalidatePath("/loja", "layout");
   revalidatePath("/meus-cursos", "layout");

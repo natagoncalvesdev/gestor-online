@@ -1,6 +1,6 @@
 import { logout } from "@/actions/auth";
 import { Logo } from "@/components/brand/logo";
-import { NavLinks } from "@/components/layout/nav-links";
+import { NavLinks, type NavItem } from "@/components/layout/nav-links";
 import { SubmitButton } from "@/components/submit-button";
 
 export function AppShell({
@@ -10,7 +10,7 @@ export function AppShell({
   alinhar = "centro",
 }: {
   area: string;
-  items: { href: string; label: string }[];
+  items: NavItem[];
   children: React.ReactNode;
   alinhar?: "centro" | "esquerda";
 }) {

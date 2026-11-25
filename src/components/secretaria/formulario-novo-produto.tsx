@@ -3,10 +3,18 @@ import { salvarProduto } from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
 import { EditorApresentacao } from "@/components/secretaria/editor-apresentacao";
 import { SubmitButton } from "@/components/submit-button";
+import { SelecaoCategoriasProduto } from "@/components/secretaria/selecao-categorias-produto";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/field";
+import type { ProdutoCategoriaLinha } from "@/lib/produto-categoria";
 
-export function FormularioNovoProduto() {
+export function FormularioNovoProduto({
+  categorias,
+  categoriasPadrao,
+}: {
+  categorias: ProdutoCategoriaLinha[];
+  categoriasPadrao: string[];
+}) {
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -32,13 +40,7 @@ export function FormularioNovoProduto() {
               </Field>
             </div>
             <div className="sm:col-span-2">
-              <Field label="Categoria">
-                <Select name="categoria" defaultValue="teologia">
-                  <option value="teologia">Curso de teologia</option>
-                  <option value="especializacao">Curso de especialização</option>
-                  <option value="livraria">Livraria</option>
-                </Select>
-              </Field>
+              <SelecaoCategoriasProduto categorias={categorias} selecionadas={categoriasPadrao} />
             </div>
             <div className="sm:col-span-2">
               <p className="mb-1 text-sm font-medium">Descrição curta</p>

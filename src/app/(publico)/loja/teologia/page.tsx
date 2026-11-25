@@ -1,5 +1,5 @@
 import { isSupabaseConfigured } from "@/lib/site";
-import { filtrarPorSecao, listarProdutosLojaAtivos } from "@/lib/loja-catalogo";
+import { filtrarPorSecao, listarCategoriasAtivas, listarProdutosLojaAtivos } from "@/lib/loja-catalogo";
 import { AvisoConfig } from "@/components/page-title";
 import { GradeProdutosLoja } from "@/components/loja/grade-produtos-loja";
 import { LojaSecaoCabecalho } from "@/components/loja/loja-secao-cabecalho";
@@ -13,7 +13,8 @@ export default async function LojaTeologiaPage() {
     );
   }
 
-  const produtos = filtrarPorSecao(await listarProdutosLojaAtivos(), "teologia");
+  const [produtos, categorias] = await Promise.all([listarProdutosLojaAtivos(), listarCategoriasAtivas()]);
+  const lista = filtrarPorSecao(produtos, categorias, "teologia");
 
   return (
     <>
@@ -24,7 +25,7 @@ export default async function LojaTeologiaPage() {
       />
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-8">
         <GradeProdutosLoja
-          produtos={produtos}
+          produtos={lista}
           vazio="Nenhum curso de teologia publicado ainda. Os produtos com matérias vinculadas aparecem aqui."
         />
       </div>

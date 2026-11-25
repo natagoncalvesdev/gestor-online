@@ -1,22 +1,20 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CheckCircle2, Clock, Lock } from "lucide-react";
 import {
   atualizarAluno,
   destacarObservacao,
   excluirDocumento,
-  liberarMateria,
-  matricularCurso,
   salvarDocumento,
   salvarObservacao,
 } from "@/actions/alunos";
 import { ActionForm } from "@/components/action-form";
 import { CpfInput } from "@/components/cpf-input";
-import { AlunoAbas } from "@/components/secretaria/aluno-abas";
+import { CursosAluno, type LinhaCursoAluno } from "@/components/secretaria/cursos-aluno";
+import { EnderecoAlunoAbas } from "@/components/secretaria/endereco-aluno-abas";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { ESTADOS } from "@/lib/estados";
+import { mesclarAlunoEndereco } from "@/lib/aluno-endereco";
 import { formatBRL, formatDate, formatDateTime } from "@/lib/format";
 import { lista, um } from "@/lib/relacao";
 import { createClient } from "@/lib/supabase/server";
@@ -29,12 +27,6 @@ const ROTULO_PEDIDO = {
   recusado: "Recusado",
 } as const;
 
-const ROTULO_MATERIA = {
-  cursando: "Cursando",
-  encerrado: "Encerrado",
-  aguardando: "Aguardando",
-} as const;
-
 export default async function AlunoDetalhePage({
   params,
 }: {
@@ -43,21 +35,26 @@ export default async function AlunoDetalhePage({
   await requireInterno();
   const { alunoId } = await params;
   const supabase = await createClient();
-  const { data: aluno } = await supabase.from("aluno").select("*").eq("id", alunoId).maybeSingle();
-  if (!aluno) notFound();
+  const { data: alunoBruto } = await supabase
+    .from("aluno")
+    .select("*, endereco_aluno(*)")
+    .eq("id", alunoId)
+    .maybeSingle();
+  if (!alunoBruto) notFound();
+  const aluno = mesclarAlunoEndereco(alunoBruto);
 
-  const [{ data: matriculas }, { data: documentos }, { data: cursos }, { data: observacoes }, { data: pedidos }, { data: aulas }, { data: progresso }] =
+  const [{ data: matriculas }, { data: documentos }, { data: cursos }, { data: observacoes }, { data: pedidos }, { data: aulas }, { data: progresso }, { data: tentativas }] =
     await Promise.all([
       supabase
         .from("matricula")
-        .select("id, status, data_criacao, produto_id, produto:produto_id(nome), materias:matricula_materia(ordem, status, liberada_em, materia_id, materia:materia_id(nome))")
+        .select("id, status, data_criacao, produto_id, produto:produto_id(nome, data_criacao), materias:matricula_materia(ordem, status, materia_id)")
         .eq("aluno_id", alunoId),
       supabase
         .from("documento_emitido")
         .select("id, tipo, informacao, codigo, data_emissao, arquivo_path, arquivo_nome")
         .eq("aluno_id", alunoId)
         .order("data_emissao", { ascending: false }),
-        supabase.from("produto").select("id, nome").eq("ativo", true).order("nome"),
+      supabase.from("produto").select("id, nome").eq("ativo", true).order("nome"),
       supabase
         .from("observacao_aluno")
         .select("id, texto, autor_nome, destaque, data_criacao")
@@ -71,6 +68,11 @@ export default async function AlunoDetalhePage({
         .order("data_criacao", { ascending: false }),
       supabase.from("aula").select("id, materia_id"),
       supabase.from("aula_progresso").select("aula_id, video_concluido").eq("aluno_id", alunoId),
+      supabase
+        .from("tentativa_prova")
+        .select("matricula_id, data_criacao")
+        .eq("aluno_id", alunoId)
+        .order("data_criacao", { ascending: false }),
     ]);
 
   const aulasPorMateria = new Map<string, string[]>();
@@ -84,133 +86,176 @@ export default async function AlunoDetalhePage({
   const digitos = telefone.replace(/\D/g, "");
   const whatsapp = digitos ? `https://wa.me/55${digitos}` : null;
   const produtosJaMatriculados = new Set((matriculas ?? []).map((item) => item.produto_id as string));
+  const produtosDisponiveis = (cursos ?? []).filter((produto) => !produtosJaMatriculados.has(produto.id));
 
-  const gruposCurso = (matriculas ?? []).map((matricula) => {
-    const produto = um(matricula.produto as { nome: string } | { nome: string }[] | null);
+  const provaPorMatricula = new Map<string, string>();
+  for (const tentativa of tentativas ?? []) {
+    const matriculaId = tentativa.matricula_id as string;
+    if (!provaPorMatricula.has(matriculaId)) {
+      provaPorMatricula.set(matriculaId, formatDateTime(tentativa.data_criacao));
+    }
+  }
+
+  const linhasCursos: LinhaCursoAluno[] = (matriculas ?? []).map((matricula) => {
+    const produto = um(matricula.produto as { nome: string; data_criacao: string } | { nome: string; data_criacao: string }[] | null);
     const materias = lista(
-      matricula.materias as {
-        ordem: number;
-        status: "bloqueada" | "liberada" | "concluida";
-        liberada_em: string | null;
-        materia_id: string;
-        materia: { nome: string } | { nome: string }[] | null;
-      }[]
-    ).sort((a, b) => a.ordem - b.ordem);
-    const linhas = materias.map((linha) => {
-      const ids = aulasPorMateria.get(linha.materia_id) ?? [];
-      const feitas = ids.filter((id) => vistas.has(id)).length;
-      const situacao = linha.status === "concluida" ? "encerrado" : linha.status === "liberada" ? "cursando" : "aguardando";
-      return {
-        key: `${matricula.id}-${linha.materia_id}`,
-        nome: um(linha.materia)?.nome ?? "Matéria",
-        situacao: situacao as keyof typeof ROTULO_MATERIA,
-        feitas,
-        total: ids.length,
-        matriculaEm: linha.liberada_em ?? matricula.data_criacao,
-        produtoId: matricula.produto_id as string,
-        materiaId: linha.materia_id,
-        bloqueada: linha.status === "bloqueada",
-      };
-    });
-    const feitas = linhas.reduce((soma, linha) => soma + linha.feitas, 0);
-    const total = linhas.reduce((soma, linha) => soma + linha.total, 0);
+      matricula.materias as { ordem: number; status: string; materia_id: string }[]
+    );
+    let feitas = 0;
+    let total = 0;
+    for (const materia of materias) {
+      const ids = aulasPorMateria.get(materia.materia_id) ?? [];
+      total += ids.length;
+      feitas += ids.filter((id) => vistas.has(id)).length;
+    }
+    const status = matricula.status as LinhaCursoAluno["status"];
+    const encerrado = status === "concluida";
     return {
       id: matricula.id as string,
-      nome: produto?.nome ?? "Produto",
+      nome: produto?.nome ?? "Curso",
+      status,
       feitas,
       total,
-      linhas,
+      dataMatricula: matricula.data_criacao as string,
+      dataPublicacao: (produto?.data_criacao ?? matricula.data_criacao) as string,
+      prova: encerrado ? "Concluído" : provaPorMatricula.get(matricula.id as string) ?? "—",
     };
   });
 
-  const abaAluno = (
-    <>
-      <Card>
-        <CardHeader>
-          <CardTitle>Informações do aluno</CardTitle>
-          <CardDescription>Dados cadastrais usados pela secretaria e pela área do aluno.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ActionForm action={atualizarAluno} className="flex flex-col gap-6">
-            <input type="hidden" name="id" value={aluno.id} />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Field label="Nome completo">
-                  <Input name="nome" defaultValue={aluno.nome} required />
+  return (
+    <div className="flex w-full max-w-6xl flex-col gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Editar aluno</h1>
+        <Link
+          href="/secretaria/alunos"
+          className="inline-flex h-8 items-center rounded-md border bg-white px-3 text-xs font-medium hover:bg-secondary"
+        >
+          Voltar à lista
+        </Link>
+      </div>
+
+      <ActionForm action={atualizarAluno} className="flex flex-col gap-6">
+        <input type="hidden" name="id" value={aluno.id} />
+
+        <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle>Informações do aluno</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <Field label="Nome completo">
+                    <Input name="nome" defaultValue={aluno.nome} required />
+                  </Field>
+                </div>
+                <Field label="Nº do aluno">
+                  <Input name="numero_aluno" defaultValue={aluno.numero_aluno} readOnly className="bg-muted text-muted-foreground" />
+                </Field>
+                <Field label="E-mail">
+                  <Input value={aluno.email} readOnly className="bg-muted text-muted-foreground" />
+                </Field>
+                <Field label="CPF">
+                  <CpfInput defaultValue={aluno.cpf} />
+                </Field>
+                <Field label="Nascimento">
+                  <Input name="data_nascimento" type="date" defaultValue={aluno.data_nascimento} required />
+                </Field>
+                <Field label="Telefone">
+                  <div className="flex items-center gap-2">
+                    <Input name="telefone" defaultValue={telefone} className="max-w-[11.5rem]" />
+                    {whatsapp ? (
+                      <a
+                        href={whatsapp}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Abrir WhatsApp"
+                        aria-label="Abrir WhatsApp"
+                        className="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-input bg-white hover:bg-secondary"
+                      >
+                        <IconeWhatsApp className="size-5 text-[#25D366]" />
+                      </a>
+                    ) : (
+                      <span
+                        className="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-dashed border-muted-foreground/30 bg-muted/30"
+                        aria-hidden
+                      >
+                        <IconeWhatsApp className="size-5 text-muted-foreground/40" />
+                      </span>
+                    )}
+                  </div>
+                </Field>
+                <Field label="Situação">
+                  <Select name="status" defaultValue={aluno.status}>
+                    <option value="ativo">Ativo</option>
+                    <option value="inativo">Inativo</option>
+                  </Select>
+                </Field>
+                <Field label="Atendente">
+                  <Input name="atendente" defaultValue={aluno.atendente ?? ""} />
+                </Field>
+                <Field label="Indicador">
+                  <Input name="indicador" defaultValue={aluno.indicador ?? ""} placeholder="Matrícula de quem indicou" />
                 </Field>
               </div>
-              <Field label="Nº do aluno">
-                <Input name="numero_aluno" defaultValue={aluno.numero_aluno} readOnly className="bg-muted text-muted-foreground" />
-              </Field>
-              <Field label="E-mail">
-                <Input value={aluno.email} readOnly className="bg-muted text-muted-foreground" />
-              </Field>
-              <Field label="CPF">
-                <CpfInput defaultValue={aluno.cpf} />
-              </Field>
-              <Field label="Nascimento">
-                <Input name="data_nascimento" type="date" defaultValue={aluno.data_nascimento} required />
-              </Field>
-              <Field label="Telefone">
-                <Input name="telefone" defaultValue={telefone} />
-                {whatsapp ? (
-                  <a href={whatsapp} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-sm text-primary underline-offset-4 hover:underline">
-                    Abrir WhatsApp
-                  </a>
-                ) : null}
-              </Field>
-              <Field label="Situação">
-                <Select name="status" defaultValue={aluno.status}>
-                  <option value="ativo">Ativo</option>
-                  <option value="inativo">Inativo</option>
-                </Select>
-              </Field>
-              <Field label="Atendente">
-                <Input name="atendente" defaultValue={aluno.atendente ?? ""} />
-              </Field>
-              <Field label="Indicador">
-                <Input name="indicador" defaultValue={aluno.indicador ?? ""} placeholder="Matrícula de quem indicou" />
-              </Field>
+            </CardContent>
+          </Card>
+
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle>Endereços</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <EnderecoAlunoAbas enderecoEntrega={aluno.endereco_entrega} enderecoCobranca={aluno.endereco_cobranca} />
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="flex justify-end">
+          <SubmitButton size="sm">Salvar aluno</SubmitButton>
+        </div>
+      </ActionForm>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Compras</CardTitle>
+        </CardHeader>
+        <CardContent className="px-0">
+          {(pedidos ?? []).length === 0 ? (
+            <p className="px-4 text-sm text-muted-foreground">Nenhuma compra registrada.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="px-4 py-2 font-medium">Data</th>
+                    <th className="px-4 py-2 font-medium">Itens</th>
+                    <th className="px-4 py-2 font-medium">Status</th>
+                    <th className="px-4 py-2 text-right font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(pedidos ?? []).map((pedido) => {
+                    const itens = lista(pedido.itens as { nome: string }[] | null)
+                      .map((item) => item.nome)
+                      .join(", ");
+                    return (
+                      <tr key={pedido.id} className="border-b last:border-0">
+                        <td className="px-4 py-3 whitespace-nowrap tabular-nums text-muted-foreground">{formatDateTime(pedido.data_criacao)}</td>
+                        <td className="px-4 py-3">{itens || "—"}</td>
+                        <td className="px-4 py-3">{ROTULO_PEDIDO[pedido.status as keyof typeof ROTULO_PEDIDO]}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">{formatBRL(pedido.valor_total)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <p className="text-sm font-medium">Endereço</p>
-              </div>
-              <Field label="CEP">
-                <Input name="cep" defaultValue={aluno.cep} />
-              </Field>
-              <Field label="Logradouro">
-                <Input name="logradouro" defaultValue={aluno.logradouro} />
-              </Field>
-              <Field label="Número">
-                <Input name="numero" defaultValue={aluno.numero} />
-              </Field>
-              <Field label="Complemento">
-                <Input name="complemento" defaultValue={aluno.complemento} />
-              </Field>
-              <Field label="Bairro">
-                <Input name="bairro" defaultValue={aluno.bairro} />
-              </Field>
-              <Field label="Cidade">
-                <Input name="cidade" defaultValue={aluno.cidade} />
-              </Field>
-              <Field label="Estado">
-                <Select name="uf" defaultValue={aluno.uf}>
-                  <option value="">Selecione o estado</option>
-                  {ESTADOS.map((estado) => (
-                    <option key={estado.uf} value={estado.uf}>
-                      {estado.nome}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-            <div className="flex justify-end">
-              <SubmitButton size="sm">Salvar</SubmitButton>
-            </div>
-          </ActionForm>
+          )}
         </CardContent>
       </Card>
+
+      <CursosAluno alunoId={aluno.id} cursos={linhasCursos} produtosDisponiveis={produtosDisponiveis} />
 
       <Card>
         <CardHeader>
@@ -218,294 +263,129 @@ export default async function AlunoDetalhePage({
           <CardDescription>Anotações internas da secretaria. O aluno não vê este histórico.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <ActionForm action={salvarObservacao} className="flex flex-col gap-2">
+          <ActionForm action={salvarObservacao} className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <input type="hidden" name="aluno_id" value={aluno.id} />
-            <Textarea name="texto" placeholder="Escreva uma observação…" rows={3} className="min-h-[4.5rem]" aria-label="Nova observação" />
-            <div className="flex justify-end">
-              <SubmitButton size="sm">Adicionar</SubmitButton>
-            </div>
+            <Field label="Nova observação">
+              <Textarea name="texto" placeholder="Escreva uma observação…" rows={3} className="min-h-[4.5rem]" />
+            </Field>
+            <SubmitButton size="sm">Adicionar</SubmitButton>
           </ActionForm>
           {(observacoes ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhuma observação ainda. Adicione a primeira acima.</p>
+            <p className="text-sm text-muted-foreground">Nenhuma observação ainda.</p>
           ) : (
-            <div className="flex flex-col gap-3">
+            <ul className="space-y-2">
               {(observacoes ?? []).map((nota) => (
-                <div key={nota.id} className="rounded-lg border bg-muted/30 px-3 py-3">
-                  <p className="whitespace-pre-wrap">{nota.texto}</p>
-                  <div className="mt-1 flex items-end justify-between gap-2">
-                    <p className="text-xs text-muted-foreground">
+                <li key={nota.id} className="flex flex-col gap-2 rounded-md border px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="whitespace-pre-wrap">{nota.texto}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {formatDateTime(nota.data_criacao)}
                       {" · "}
                       {nota.autor_nome}
                       {nota.destaque ? " · Fixada" : ""}
                     </p>
-                    <ActionForm action={destacarObservacao}>
-                      <input type="hidden" name="id" value={nota.id} />
-                      <input type="hidden" name="aluno_id" value={aluno.id} />
-                      <input type="hidden" name="destaque" value={nota.destaque ? "1" : "0"} />
-                      <SubmitButton variant="outline" size="sm">
-                        {nota.destaque ? "Desafixar" : "Fixar"}
-                      </SubmitButton>
-                    </ActionForm>
                   </div>
-                </div>
+                  <ActionForm action={destacarObservacao}>
+                    <input type="hidden" name="id" value={nota.id} />
+                    <input type="hidden" name="aluno_id" value={aluno.id} />
+                    <input type="hidden" name="destaque" value={nota.destaque ? "1" : "0"} />
+                    <SubmitButton variant="outline" size="sm">
+                      {nota.destaque ? "Desafixar" : "Fixar"}
+                    </SubmitButton>
+                  </ActionForm>
+                </li>
               ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Documentos emitidos</CardTitle>
+          <CardDescription>Certificados, declarações e outros arquivos entregues ao aluno.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <ActionForm action={salvarDocumento} className="grid gap-4 sm:grid-cols-2">
+            <input type="hidden" name="aluno_id" value={aluno.id} />
+            <Field label="Tipo de documento">
+              <Input name="tipo" required placeholder="Certificado, declaração" />
+            </Field>
+            <Field label="Código">
+              <Input name="codigo" />
+            </Field>
+            <Field label="Data de emissão">
+              <Input name="data_emissao" type="date" />
+            </Field>
+            <Field label="Arquivo">
+              <Input name="arquivo" type="file" />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Informação complementar">
+                <Input name="informacao" />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <SubmitButton size="sm">Registrar documento</SubmitButton>
+            </div>
+          </ActionForm>
+          {(documentos ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum documento registrado.</p>
+          ) : (
+            <div className="overflow-x-auto border-t">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="py-2 pr-4 font-medium">Tipo</th>
+                    <th className="px-4 py-2 font-medium">Código</th>
+                    <th className="px-4 py-2 font-medium">Emissão</th>
+                    <th className="px-4 py-2 font-medium">Arquivo</th>
+                    <th className="px-4 py-2 font-medium">Observação</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(documentos ?? []).map((documento) => (
+                    <tr key={documento.id} className="border-b last:border-0">
+                      <td className="py-3 pr-4 font-medium">{documento.tipo}</td>
+                      <td className="px-4 py-3">{documento.codigo || "—"}</td>
+                      <td className="px-4 py-3 whitespace-nowrap tabular-nums">{formatDate(documento.data_emissao)}</td>
+                      <td className="px-4 py-3">
+                        {documento.arquivo_path ? (
+                          <a href={`/api/documento/${documento.id}`} className="text-primary underline-offset-4 hover:underline">
+                            {documento.arquivo_nome || "Baixar"}
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-4 py-3">{documento.informacao || "—"}</td>
+                      <td className="py-3 pl-4 text-right">
+                        <ActionForm action={excluirDocumento}>
+                          <input type="hidden" name="id" value={documento.id} />
+                          <input type="hidden" name="aluno_id" value={aluno.id} />
+                          <input type="hidden" name="arquivo_path" value={documento.arquivo_path ?? ""} />
+                          <SubmitButton variant="ghost" size="sm" className="text-destructive">
+                            Excluir
+                          </SubmitButton>
+                        </ActionForm>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </CardContent>
       </Card>
-    </>
-  );
-
-  const abaCursos =
-    gruposCurso.length === 0 ? (
-      <div className="flex flex-col gap-6">
-        <Matricular alunoId={aluno.id} produtos={(cursos ?? []).filter((produto) => !produtosJaMatriculados.has(produto.id))} />
-        <p className="rounded-xl border border-dashed p-6 text-center text-muted-foreground">Este aluno ainda não está matriculado em nenhum produto.</p>
-      </div>
-    ) : (
-      <div className="flex flex-col gap-6">
-        <Matricular alunoId={aluno.id} produtos={(cursos ?? []).filter((produto) => !produtosJaMatriculados.has(produto.id))} />
-        {gruposCurso.map((grupo) => {
-          const percentual = grupo.total > 0 ? Math.round((grupo.feitas / grupo.total) * 100) : 0;
-          return (
-            <Card key={grupo.id}>
-              <CardHeader>
-                <CardTitle>{grupo.nome}</CardTitle>
-                <CardDescription>
-                  {grupo.feitas} de {grupo.total} aulas concluídas
-                </CardDescription>
-                <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percentual} aria-valuemin={0} aria-valuemax={100}>
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${percentual}%` }} />
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-0 divide-y border-t px-0 pt-0">
-                {grupo.linhas.map((linha) => (
-                  <div key={linha.key} className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:gap-4">
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                      <span className="mt-0.5 shrink-0">
-                        {linha.situacao === "aguardando" ? (
-                          <Lock className="size-5 text-muted-foreground/40" aria-hidden />
-                        ) : linha.situacao === "cursando" ? (
-                          <Clock className="size-5 text-amber-600" aria-hidden />
-                        ) : (
-                          <CheckCircle2 className="size-5 text-emerald-600" aria-hidden />
-                        )}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-medium leading-tight">{linha.nome}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {ROTULO_MATERIA[linha.situacao]}
-                          {" · "}
-                          <span className="tabular-nums text-foreground">
-                            {linha.feitas}/{linha.total}
-                          </span>{" "}
-                          aulas
-                          {linha.bloqueada ? null : (
-                            <>
-                              {" · "}
-                              matrícula em {formatDateTime(linha.matriculaEm)}
-                            </>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    {linha.bloqueada ? (
-                      <ActionForm action={liberarMateria}>
-                        <input type="hidden" name="aluno_id" value={aluno.id} />
-                        <input type="hidden" name="produto_id" value={linha.produtoId} />
-                        <input type="hidden" name="materia_id" value={linha.materiaId} />
-                        <SubmitButton variant="outline" size="sm">
-                          Liberar matéria
-                        </SubmitButton>
-                      </ActionForm>
-                    ) : null}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    );
-
-  const abaCompras = (
-    <Card>
-      <CardHeader>
-        <CardTitle>Compras</CardTitle>
-        <CardDescription>Pedidos registrados para este aluno.</CardDescription>
-      </CardHeader>
-      <CardContent className="px-0">
-        {(pedidos ?? []).length === 0 ? (
-          <p className="px-4 text-sm text-muted-foreground">Nenhuma compra registrada.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Data</th>
-                  <th className="px-4 py-2 font-medium">Itens</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
-                  <th className="px-4 py-2 text-right font-medium">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(pedidos ?? []).map((pedido) => {
-                  const itens = lista(pedido.itens as { nome: string }[] | null)
-                    .map((item) => item.nome)
-                    .join(", ");
-                  return (
-                    <tr key={pedido.id} className="border-b last:border-0">
-                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground tabular-nums">{formatDateTime(pedido.data_criacao)}</td>
-                      <td className="px-4 py-3">{itens || "—"}</td>
-                      <td className="px-4 py-3">{ROTULO_PEDIDO[pedido.status as keyof typeof ROTULO_PEDIDO]}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{formatBRL(pedido.valor_total)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-
-  const abaDocumentos = (
-    <Card>
-      <CardHeader>
-        <CardTitle>Documentos emitidos</CardTitle>
-        <CardDescription>Certificados, declarações e outros arquivos entregues ao aluno.</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        <ActionForm action={salvarDocumento} className="grid gap-4 sm:grid-cols-2">
-          <input type="hidden" name="aluno_id" value={aluno.id} />
-          <Field label="Tipo de documento">
-            <Input name="tipo" required placeholder="Certificado, declaração" />
-          </Field>
-          <Field label="Código">
-            <Input name="codigo" />
-          </Field>
-          <Field label="Data de emissão">
-            <Input name="data_emissao" type="date" />
-          </Field>
-          <Field label="Arquivo">
-            <Input name="arquivo" type="file" />
-          </Field>
-          <div className="sm:col-span-2">
-            <Field label="Informação complementar">
-              <Input name="informacao" />
-            </Field>
-          </div>
-          <div className="flex justify-end sm:col-span-2">
-            <SubmitButton size="sm">Registrar documento</SubmitButton>
-          </div>
-        </ActionForm>
-        {(documentos ?? []).length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum documento registrado.</p>
-        ) : (
-          <div className="overflow-x-auto border-t">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="py-2 pr-4 font-medium">Tipo</th>
-                  <th className="px-4 py-2 font-medium">Código</th>
-                  <th className="px-4 py-2 font-medium">Emissão</th>
-                  <th className="px-4 py-2 font-medium">Arquivo</th>
-                  <th className="px-4 py-2 font-medium">Observação</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {(documentos ?? []).map((documento) => (
-                  <tr key={documento.id} className="border-b last:border-0">
-                    <td className="py-3 pr-4 font-medium">{documento.tipo}</td>
-                    <td className="px-4 py-3">{documento.codigo || "—"}</td>
-                    <td className="px-4 py-3 whitespace-nowrap tabular-nums">{formatDate(documento.data_emissao)}</td>
-                    <td className="px-4 py-3">
-                      {documento.arquivo_path ? (
-                        <a href={`/api/documento/${documento.id}`} className="text-primary underline-offset-4 hover:underline">
-                          {documento.arquivo_nome || "Baixar"}
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-4 py-3">{documento.informacao || "—"}</td>
-                    <td className="py-3 pl-4 text-right">
-                      <ActionForm action={excluirDocumento}>
-                        <input type="hidden" name="id" value={documento.id} />
-                        <input type="hidden" name="aluno_id" value={aluno.id} />
-                        <input type="hidden" name="arquivo_path" value={documento.arquivo_path ?? ""} />
-                        <SubmitButton variant="ghost" size="sm" className="text-destructive">
-                          Excluir
-                        </SubmitButton>
-                      </ActionForm>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-
-  return (
-    <div className="flex w-full max-w-4xl flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <Link href="/secretaria/alunos" className="mb-1 -ml-2 inline-flex h-8 w-fit items-center rounded-md px-2 text-sm font-medium hover:bg-secondary">
-          ← Voltar para alunos
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{aluno.nome}</h1>
-        <p className="text-sm text-muted-foreground">
-          Aluno nº {aluno.numero_aluno} · {aluno.status === "ativo" ? "Ativo" : "Inativo"} · cadastrado em {formatDate(aluno.data_cadastro)}
-        </p>
-      </div>
-      <AlunoAbas
-        abas={[
-          { id: "aluno", rotulo: "Aluno", conteudo: abaAluno },
-          { id: "estudos", rotulo: "Estudos", conteudo: abaCursos },
-          { id: "compras", rotulo: "Compras", conteudo: abaCompras },
-          { id: "documentos", rotulo: "Documentos", conteudo: abaDocumentos },
-        ]}
-      />
     </div>
   );
 }
 
-function Matricular({
-  alunoId,
-  produtos,
-}: {
-  alunoId: string;
-  produtos: { id: string; nome: string }[];
-}) {
+function IconeWhatsApp({ className }: { className?: string }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Matricular em um produto</CardTitle>
-        <CardDescription>Abre as primeiras matérias do produto, conforme o limite definido nele.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ActionForm action={matricularCurso} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <input type="hidden" name="aluno_id" value={alunoId} />
-          <div className="min-w-0 flex-1">
-            <Field label="Produto">
-              <Select name="produto_id" defaultValue="">
-                <option value="">{produtos.length === 0 ? "Nenhum produto disponível" : "Selecione o produto"}</option>
-                {produtos.map((produto) => (
-                  <option key={produto.id} value={produto.id}>
-                    {produto.nome}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <SubmitButton size="sm">Matricular</SubmitButton>
-        </ActionForm>
-      </CardContent>
-    </Card>
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+    </svg>
   );
 }

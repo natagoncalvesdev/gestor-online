@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { requireAluno, requireInterno } from "@/lib/session";
+import { enderecosDoForm } from "@/lib/aluno-endereco";
 import { cpfOnlyDigits, formatCpfDisplay, isValidCpf } from "@/lib/cpf";
 import type { FormState } from "@/lib/form-state";
 
@@ -36,13 +37,6 @@ export async function atualizarAluno(_prev: FormState, formData: FormData): Prom
       data_nascimento: dataNascimento,
       telefone,
       numero_aluno: numeroAluno,
-      cep: String(formData.get("cep") ?? "").trim(),
-      logradouro: String(formData.get("logradouro") ?? "").trim(),
-      numero: String(formData.get("numero") ?? "").trim(),
-      complemento: String(formData.get("complemento") ?? "").trim(),
-      bairro: String(formData.get("bairro") ?? "").trim(),
-      cidade: String(formData.get("cidade") ?? "").trim(),
-      uf: String(formData.get("uf") ?? ""),
       atendente: String(formData.get("atendente") ?? "").trim(),
       indicador: String(formData.get("indicador") ?? "").trim(),
       status: status === "inativo" ? "inativo" : "ativo",
@@ -50,6 +44,11 @@ export async function atualizarAluno(_prev: FormState, formData: FormData): Prom
     .eq("id", id);
 
   if (error) return { error: dbMessage(error) };
+
+  const { error: erroEndereco } = await supabase
+    .from("endereco_aluno")
+    .upsert(enderecosDoForm(formData, id), { onConflict: "aluno_id,finalidade" });
+  if (erroEndereco) return { error: dbMessage(erroEndereco) };
   revalidatePath(`/secretaria/alunos/${id}`);
   revalidatePath("/secretaria/alunos");
   return { ok: "Cadastro atualizado." };
@@ -62,16 +61,14 @@ export async function atualizarPerfil(_prev: FormState, formData: FormData): Pro
     .from("aluno")
     .update({
       telefone: String(formData.get("telefone") ?? "").trim(),
-      cep: String(formData.get("cep") ?? "").trim(),
-      logradouro: String(formData.get("logradouro") ?? "").trim(),
-      numero: String(formData.get("numero") ?? "").trim(),
-      complemento: String(formData.get("complemento") ?? "").trim(),
-      bairro: String(formData.get("bairro") ?? "").trim(),
-      cidade: String(formData.get("cidade") ?? "").trim(),
-      uf: String(formData.get("uf") ?? ""),
     })
     .eq("id", session.user.id);
   if (error) return { error: dbMessage(error) };
+
+  const { error: erroEndereco } = await supabase
+    .from("endereco_aluno")
+    .upsert(enderecosDoForm(formData, session.user.id), { onConflict: "aluno_id,finalidade" });
+  if (erroEndereco) return { error: dbMessage(erroEndereco) };
   revalidatePath("/perfil");
   return { ok: "Perfil atualizado." };
 }
@@ -95,6 +92,82 @@ export async function matricularCurso(_prev: FormState, formData: FormData): Pro
   return criada
     ? { ok: "Aluno matriculado. As primeiras matérias foram liberadas." }
     : { error: "O aluno já está matriculado neste produto." };
+}
+
+export async function concluirMatricula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireInterno();
+  const supabase = await createClient();
+  const alunoId = String(formData.get("aluno_id") ?? "");
+  const matriculaId = String(formData.get("matricula_id") ?? "");
+  const { error } = await supabase
+    .from("matricula")
+    .update({ status: "concluida" })
+    .eq("id", matriculaId)
+    .eq("aluno_id", alunoId)
+    .eq("status", "ativa");
+  if (error) return { error: error.message };
+  revalidatePath(`/secretaria/alunos/${alunoId}`);
+  return { ok: "Matrícula concluída." };
+}
+
+export async function desmatricularMatricula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireInterno();
+  const supabase = await createClient();
+  const alunoId = String(formData.get("aluno_id") ?? "");
+  const matriculaId = String(formData.get("matricula_id") ?? "");
+  const { error } = await supabase
+    .from("matricula")
+    .update({ status: "cancelada" })
+    .eq("id", matriculaId)
+    .eq("aluno_id", alunoId)
+    .neq("status", "cancelada");
+  if (error) return { error: error.message };
+  revalidatePath(`/secretaria/alunos/${alunoId}`);
+  return { ok: "Aluno desmatriculado deste curso." };
+}
+
+export async function reiniciarMatricula(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireInterno();
+  const supabase = await createClient();
+  const alunoId = String(formData.get("aluno_id") ?? "");
+  const matriculaId = String(formData.get("matricula_id") ?? "");
+  const { data: matricula } = await supabase
+    .from("matricula")
+    .select("id, produto_id, status")
+    .eq("id", matriculaId)
+    .eq("aluno_id", alunoId)
+    .maybeSingle();
+  if (!matricula) return { error: "Matrícula não encontrada." };
+  if (matricula.status !== "concluida") return { error: "Só é possível reiniciar matrícula encerrada." };
+
+  const { data: produto } = await supabase.from("produto").select("materias_simultaneas").eq("id", matricula.produto_id).maybeSingle();
+  const limite = Math.max(1, Number(produto?.materias_simultaneas ?? 1));
+
+  const { error: erroStatus } = await supabase.from("matricula").update({ status: "ativa" }).eq("id", matriculaId);
+  if (erroStatus) return { error: erroStatus.message };
+
+  const { data: materias } = await supabase
+    .from("matricula_materia")
+    .select("id, ordem")
+    .eq("matricula_id", matriculaId)
+    .order("ordem");
+  const listaMaterias = materias ?? [];
+  const idsLiberar = new Set(listaMaterias.slice(0, limite).map((item) => item.id));
+  for (const materia of listaMaterias) {
+    const liberada = idsLiberar.has(materia.id);
+    const { error } = await supabase
+      .from("matricula_materia")
+      .update({
+        status: liberada ? "liberada" : "bloqueada",
+        liberada_em: liberada ? new Date().toISOString() : null,
+        concluida_em: null,
+      })
+      .eq("id", materia.id);
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath(`/secretaria/alunos/${alunoId}`);
+  return { ok: "Matrícula reiniciada." };
 }
 
 export async function liberarMateria(_prev: FormState, formData: FormData): Promise<FormState> {

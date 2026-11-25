@@ -5,30 +5,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/field";
 import { CapaProduto } from "@/components/loja/capa-produto";
 import { EditarBanner } from "@/components/secretaria/editar-banner";
-import { excluirBanner, moverBanner, salvarBanner, salvarGoogle, salvarTokenInstagram } from "@/actions/pagina-inicial";
-import { buscarGoogle, buscarInstagram } from "@/lib/home-apis";
+import { excluirBanner, moverBanner, salvarBanner } from "@/actions/pagina-inicial";
 import type { FormState } from "@/lib/form-state";
 import { urlImagemSite } from "@/lib/site-imagem";
 import { requireAdmin } from "@/lib/session";
-import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function PaginaInicialAdmin() {
   await requireAdmin();
   const supabase = await createClient();
-  const admin = createServiceRoleClient();
-  const [{ data: banners }, integracaoRes] = await Promise.all([
-    supabase.from("home_banner").select("*").order("ordem"),
-    admin ? admin.from("home_integracao").select("google_api_key, google_place_id, instagram_token").eq("id", 1).maybeSingle() : Promise.resolve({ data: null }),
-  ]);
-  const integracao = integracaoRes.data;
-  const [google, instagram] = await Promise.all([
-    buscarGoogle({
-      google_api_key: integracao?.google_api_key ?? "",
-      google_place_id: integracao?.google_place_id ?? "",
-    }),
-    buscarInstagram(integracao?.instagram_token ?? ""),
-  ]);
+  const { data: banners } = await supabase.from("home_banner").select("*").order("ordem");
 
   return (
     <div className="flex w-full flex-col gap-8">
@@ -73,55 +59,6 @@ export default async function PaginaInicialAdmin() {
           excluir={excluirBanner}
           mover={moverBanner}
         />
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold">Avaliações do Google</h2>
-        <p className="text-sm text-muted-foreground">
-          Use a chave da Places API e o Place ID. A nota, o total e os comentários vêm do Google.
-        </p>
-        <Card>
-          <CardContent className="p-4">
-            <ActionForm action={salvarGoogle} className="grid gap-4 sm:grid-cols-2">
-              <Field label="Chave da API do Google">
-                <Input name="google_api_key" type="password" autoComplete="off" placeholder={integracao?.google_api_key ? "Chave já salva — preencha só para trocar" : "AIza..."} />
-              </Field>
-              <Field label="Place ID">
-                <Input name="google_place_id" defaultValue={integracao?.google_place_id ?? ""} placeholder="ChIJ..." />
-              </Field>
-              <div className="sm:col-span-2">
-                <SubmitButton>Salvar Google</SubmitButton>
-              </div>
-            </ActionForm>
-          </CardContent>
-        </Card>
-        {google.erro ? <p className="text-sm text-destructive">{google.erro}</p> : null}
-        {google.dados ? (
-          <p className="text-sm text-muted-foreground">
-            Nota {google.dados.nota.toFixed(1).replace(".", ",")} · {google.dados.resumo} · {google.dados.avaliacoes.length} comentários recebidos
-          </p>
-        ) : null}
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold">Instagram</h2>
-        <p className="text-sm text-muted-foreground">
-          Cole o token de acesso de longa duração da conta profissional. As publicações recentes aparecem na página inicial.
-        </p>
-        <Card>
-          <CardContent className="p-4">
-            <ActionForm action={salvarTokenInstagram} className="space-y-4">
-              <Field label="Token do Instagram">
-                <Input name="instagram_token" type="password" autoComplete="off" placeholder={integracao?.instagram_token ? "Token já salvo — preencha só para trocar" : ""} />
-              </Field>
-              <SubmitButton>Salvar Instagram</SubmitButton>
-            </ActionForm>
-          </CardContent>
-        </Card>
-        {instagram.erro ? <p className="text-sm text-destructive">{instagram.erro}</p> : null}
-        {instagram.posts.length > 0 ? (
-          <p className="text-sm text-muted-foreground">{instagram.posts.length} publicações recebidas da API.</p>
-        ) : null}
       </section>
     </div>
   );

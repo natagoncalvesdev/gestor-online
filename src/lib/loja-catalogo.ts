@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { um } from "@/lib/relacao";
+import { produtoNaSecaoLoja, type ProdutoCategoriaLinha, type SecaoLoja } from "@/lib/produto-categoria";
 
 export type ProdutoLoja = {
   id: string;
@@ -14,7 +15,7 @@ export type ProdutoLoja = {
   largura_cm: number;
   altura_cm: number;
   imagem_path: string | null;
-  categoria: "teologia" | "especializacao" | "livraria";
+  categoriaIds: string[];
   materias: { nome: string }[];
 };
 
@@ -32,12 +33,24 @@ function mapProdutos(
     largura_cm: number;
     altura_cm: number;
     imagem_path: string | null;
-    categoria: "teologia" | "especializacao" | "livraria";
+    vinculos: { categoria_id: string }[] | null;
     materias: { materia: { nome: string } | { nome: string }[] | null }[] | null;
   }[],
 ): ProdutoLoja[] {
   return data.map((item) => ({
-    ...item,
+    id: item.id,
+    nome: item.nome,
+    slug: item.slug,
+    descricao: item.descricao,
+    preco: item.preco,
+    preco_promocional: item.preco_promocional,
+    promocao_ate: item.promocao_ate,
+    peso_gramas: item.peso_gramas,
+    comprimento_cm: item.comprimento_cm,
+    largura_cm: item.largura_cm,
+    altura_cm: item.altura_cm,
+    imagem_path: item.imagem_path,
+    categoriaIds: (item.vinculos ?? []).map((linha) => linha.categoria_id),
     materias:
       item.materias
         ?.map((linha) => um(linha.materia))
@@ -46,7 +59,7 @@ function mapProdutos(
 }
 
 const selectProduto =
-  "id, nome, slug, descricao, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, imagem_path, categoria, materias:produto_materia(materia:materia_id(nome))";
+  "id, nome, slug, descricao, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, imagem_path, vinculos:produto_categoria_produto(categoria_id), materias:produto_materia(materia:materia_id(nome))";
 
 export async function listarProdutosLojaAtivos(): Promise<ProdutoLoja[]> {
   const supabase = await createClient();
@@ -58,18 +71,15 @@ export async function listarProdutosLojaAtivos(): Promise<ProdutoLoja[]> {
   return mapProdutos(data ?? []);
 }
 
-export const CATEGORIAS_PRODUTO = [
-  { valor: "teologia", rotulo: "Curso de teologia" },
-  { valor: "especializacao", rotulo: "Curso de especialização" },
-  { valor: "livraria", rotulo: "Livraria" },
-] as const;
-
-export function rotuloCategoria(categoria: string) {
-  return CATEGORIAS_PRODUTO.find((item) => item.valor === categoria)?.rotulo ?? "Curso de teologia";
+export async function listarCategoriasAtivas(): Promise<ProdutoCategoriaLinha[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("produto_categoria")
+    .select("id, nome, slug, descricao, pai_id, ordem, ativo")
+    .order("ordem");
+  return (data ?? []) as ProdutoCategoriaLinha[];
 }
 
-export function filtrarPorSecao(produtos: ProdutoLoja[], secao: "teologia" | "especializacoes" | "livraria") {
-  if (secao === "livraria") return produtos.filter((produto) => produto.categoria === "livraria");
-  if (secao === "especializacoes") return produtos.filter((produto) => produto.categoria === "especializacao");
-  return produtos.filter((produto) => produto.categoria === "teologia");
+export function filtrarPorSecao(produtos: ProdutoLoja[], categorias: ProdutoCategoriaLinha[], secao: SecaoLoja) {
+  return produtos.filter((produto) => produtoNaSecaoLoja(produto.categoriaIds, categorias, secao));
 }

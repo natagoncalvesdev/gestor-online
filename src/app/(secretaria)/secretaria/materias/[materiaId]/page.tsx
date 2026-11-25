@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { criarAula, excluirQuestao, salvarMateria, salvarQuestao, salvarTopico } from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
-import { EscolaDominicalAdmin, type LicaoAdmin } from "@/components/secretaria/escola-dominical-admin";
 import { campoDataHora } from "@/lib/ebd";
 import { SequenciaAulas } from "@/components/secretaria/sequencia-aulas";
 import { SubmitButton } from "@/components/submit-button";
@@ -20,7 +19,7 @@ export default async function MateriaDetalhePage({
   const { data: materia } = await supabase.from("materia").select("*").eq("id", materiaId).maybeSingle();
   if (!materia) notFound();
 
-  const [{ data: aulas }, { data: questoes }, { data: licoes }, { data: topicos }] = await Promise.all([
+  const [{ data: aulas }, { data: questoes }, { data: topicos }] = await Promise.all([
     supabase
       .from("aula")
       .select("id, titulo, ordem, bunny_video_id, youtube_id, epub_path, epub_nome, topico_id, libera_em, posicao")
@@ -29,11 +28,6 @@ export default async function MateriaDetalhePage({
     supabase
       .from("questao")
       .select("id, enunciado, ordem, alternativas:alternativa(id, texto, correta, ordem)")
-      .eq("materia_id", materiaId)
-      .order("ordem"),
-    supabase
-      .from("ebd_licao")
-      .select("id, ordem, titulo, youtube_url, pdf_exibir_path, libera_em, anexos:ebd_anexo(id, nome)")
       .eq("materia_id", materiaId)
       .order("ordem"),
     supabase.from("aula_topico").select("id, titulo, ordem, posicao").eq("materia_id", materiaId).order("posicao"),
@@ -82,11 +76,6 @@ export default async function MateriaDetalhePage({
         </label>
         <SubmitButton>Salvar matéria</SubmitButton>
       </ActionForm>
-      <EscolaDominicalAdmin
-        materiaId={materia.id}
-        licoes={((licoes ?? []) as LicaoAdmin[]).map((licao) => ({ ...licao, anexos: licao.anexos ?? [] }))}
-      />
-
       <section className="max-w-3xl space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Tópicos e aulas</h2>
