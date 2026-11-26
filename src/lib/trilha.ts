@@ -40,6 +40,7 @@ type LinhaQuestionario = {
   aula_id: string | null;
   titulo: string;
   posicao: number;
+  encerra_materia?: boolean;
 };
 
 type Consulta = {
@@ -63,7 +64,6 @@ export function montarTrilha(entrada: {
   topicos: LinhaFilho[];
   questionarios: LinhaQuestionario[];
   aulasVistas: Set<string>;
-  topicosVistos: Set<string>;
   questionariosAprovados: Set<string>;
   consulta: string;
 }): PassoTrilha[] {
@@ -90,12 +90,13 @@ export function montarTrilha(entrada: {
       nivel: 1,
       href: `/topico/${topico.id}${entrada.consulta}`,
       aberta,
-      concluida: entrada.topicosVistos.has(topico.id),
+      concluida: entrada.aulasVistas.has(topico.aula_id),
       quando: quando(bloqueio, aberta),
     });
   }
 
   for (const questionario of entrada.questionarios) {
+    if (questionario.encerra_materia) continue;
     if (!questionario.aula_id) continue;
     const aula = aulasPorId.get(questionario.aula_id);
     const aberta = aula ? abertaEm(aula.libera_em) : true;
@@ -148,7 +149,7 @@ export function montarTrilha(entrada: {
       };
     }),
     ...entrada.questionarios
-      .filter((questionario) => !questionario.aula_id)
+      .filter((questionario) => !questionario.aula_id && !questionario.encerra_materia)
       .map((questionario) => ({
         posicao: questionario.posicao,
         ordem: questionario.posicao,
@@ -231,7 +232,7 @@ export async function carregarTrilha(
   const [{ data: aulas }, { data: secoes }, { data: questionarios }] = await Promise.all([
     supabase.from("aula").select("id, titulo, ordem, posicao, libera_em").eq("materia_id", materiaId).order("posicao"),
     supabase.from("aula_topico").select("id, titulo, ordem, posicao").eq("materia_id", materiaId).order("posicao"),
-    supabase.from("questionario").select("id, aula_id, titulo, posicao").eq("materia_id", materiaId).order("posicao"),
+    supabase.from("questionario").select("id, aula_id, titulo, posicao, encerra_materia").eq("materia_id", materiaId).order("posicao"),
   ]);
 
   const linhasAula = (aulas ?? []) as LinhaAula[];
@@ -242,15 +243,11 @@ export async function carregarTrilha(
 
   const linhasTopico = (topicos ?? []) as LinhaFilho[];
   const linhasQuestionario = (questionarios ?? []) as LinhaQuestionario[];
-  const idsTopico = linhasTopico.map((topico) => topico.id);
   const idsQuestionario = linhasQuestionario.map((questionario) => questionario.id);
 
-  const [{ data: progressoAula }, { data: progressoTopico }, { data: tentativas }] = await Promise.all([
+  const [{ data: progressoAula }, { data: tentativas }, { data: provasEntregues }] = await Promise.all([
     idsAula.length
       ? supabase.from("aula_progresso").select("aula_id, video_concluido").eq("aluno_id", alunoId).in("aula_id", idsAula)
-      : Promise.resolve({ data: [] }),
-    idsTopico.length
-      ? supabase.from("topico_progresso").select("topico_id, video_concluido").eq("aluno_id", alunoId).in("topico_id", idsTopico)
       : Promise.resolve({ data: [] }),
     idsQuestionario.length
       ? supabase
@@ -258,6 +255,14 @@ export async function carregarTrilha(
           .select("questionario_id, aprovado")
           .eq("aluno_id", alunoId)
           .eq("aprovado", true)
+          .in("questionario_id", idsQuestionario)
+      : Promise.resolve({ data: [] }),
+    idsQuestionario.length
+      ? supabase
+          .from("tentativa_prova")
+          .select("questionario_id")
+          .eq("aluno_id", alunoId)
+          .not("entregue_em", "is", null)
           .in("questionario_id", idsQuestionario)
       : Promise.resolve({ data: [] }),
   ]);
@@ -272,13 +277,11 @@ export async function carregarTrilha(
         .filter((item) => item.video_concluido)
         .map((item) => item.aula_id)
     ),
-    topicosVistos: new Set(
-      ((progressoTopico ?? []) as { topico_id: string; video_concluido: boolean }[])
-        .filter((item) => item.video_concluido)
-        .map((item) => item.topico_id)
-    ),
     questionariosAprovados: new Set(
-      ((tentativas ?? []) as { questionario_id: string | null }[])
+      [
+        ...((tentativas ?? []) as { questionario_id: string | null }[]),
+        ...((provasEntregues ?? []) as { questionario_id: string | null }[]),
+      ]
         .map((item) => item.questionario_id)
         .filter((id): id is string => Boolean(id))
     ),

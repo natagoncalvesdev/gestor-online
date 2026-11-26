@@ -1,10 +1,13 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { criarAula, salvarMateria, salvarTopico } from "@/actions/catalogo";
 import { ActionForm } from "@/components/action-form";
 import { campoDataHora } from "@/lib/ebd";
 import { SequenciaAulas } from "@/components/secretaria/sequencia-aulas";
 import { SubmitButton } from "@/components/submit-button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/field";
+import { InterruptorForm } from "@/components/ui/interruptor";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/session";
 
@@ -19,7 +22,7 @@ export default async function MateriaDetalhePage({
   const { data: materia } = await supabase.from("materia").select("*").eq("id", materiaId).maybeSingle();
   if (!materia) notFound();
 
-  const [{ data: aulas }, { data: questoes }, { data: secoes }, { data: questionarios }] = await Promise.all([
+  const [{ data: aulas }, questoesConsulta, { data: secoes }, { data: questionarios }] = await Promise.all([
     supabase
       .from("aula")
       .select("id, titulo, ordem, conteudo, bunny_video_id, youtube_id, epub_path, epub_nome, libera_em, posicao")
@@ -27,26 +30,33 @@ export default async function MateriaDetalhePage({
       .order("posicao"),
     supabase
       .from("questao")
-      .select("id, enunciado, ordem, questionario_id, alternativas:alternativa(id, texto, correta, ordem)")
+      .select("id, enunciado, ordem, ativo, questionario_id, alternativas:alternativa(id, texto, correta, ordem)")
       .eq("materia_id", materiaId)
       .order("ordem"),
     supabase.from("aula_topico").select("id, titulo, ordem, posicao").eq("materia_id", materiaId).order("posicao"),
-    supabase.from("questionario").select("id, aula_id, titulo, posicao, nota_minima, encerra_materia").eq("materia_id", materiaId).order("posicao"),
+    supabase.from("questionario").select("id, aula_id, titulo, posicao, encerra_materia").eq("materia_id", materiaId).order("posicao"),
   ]);
+  const questoesFallback = questoesConsulta.error
+    ? await supabase
+        .from("questao")
+        .select("id, enunciado, ordem, questionario_id, alternativas:alternativa(id, texto, correta, ordem)")
+        .eq("materia_id", materiaId)
+        .order("ordem")
+    : null;
+  const questoes = (questoesFallback?.data ?? questoesConsulta.data ?? []).map((questao) => ({
+    ...questao,
+    ativo: "ativo" in questao ? Boolean(questao.ativo) : true,
+  }));
   const aulaIds = (aulas ?? []).map((aula) => aula.id);
-  const [{ data: arquivos }, { data: topicosAula }] = await Promise.all([
-    aulaIds.length
-      ? supabase.from("aula_arquivo").select("id, aula_id, topico_id, nome, visualizar, baixar").in("aula_id", aulaIds)
-      : Promise.resolve({ data: [] as { id: string; aula_id: string; topico_id: string | null; nome: string; visualizar: boolean; baixar: boolean }[] }),
-    aulaIds.length
-      ? supabase.from("topico").select("id, aula_id, titulo, conteudo, posicao, bunny_video_id, youtube_id, epub_path, epub_nome, libera_em").in("aula_id", aulaIds).order("posicao")
-      : Promise.resolve({ data: [] as { id: string; aula_id: string; titulo: string; conteudo: string; posicao: number; bunny_video_id: string | null; youtube_id: string | null; epub_path: string | null; epub_nome: string | null; libera_em: string | null }[] }),
-  ]);
+  const { data: arquivos } = aulaIds.length
+    ? await supabase.from("aula_arquivo").select("id, aula_id, topico_id, nome, visualizar, baixar").in("aula_id", aulaIds)
+    : { data: [] as { id: string; aula_id: string; topico_id: string | null; nome: string; visualizar: boolean; baixar: boolean }[] };
 
   const listaQuestoes = (questoes ?? []) as {
     id: string;
     enunciado: string;
     ordem: number;
+    ativo: boolean;
     questionario_id: string | null;
     alternativas: { id: string; texto: string; correta: boolean; ordem: number }[] | null;
   }[];
@@ -63,6 +73,7 @@ export default async function MateriaDetalhePage({
         id: questao.id,
         enunciado: questao.enunciado,
         ordem: questao.ordem,
+        ativo: questao.ativo,
         alternativas: (questao.alternativas ?? []).slice().sort((a, b) => a.ordem - b.ordem),
       }));
   }
@@ -74,39 +85,70 @@ export default async function MateriaDetalhePage({
   ].sort((a, b) => a.posicao - b.posicao);
 
   return (
-    <div className="space-y-10">
-      <h1 className="text-2xl font-semibold">{materia.nome}</h1>
-      <ActionForm action={salvarMateria} className="grid max-w-xl gap-4">
-        <input type="hidden" name="id" value={materia.id} />
-        <Field label="Nome">
-          <Input name="nome" defaultValue={materia.nome} required />
-        </Field>
-        <Field label="Código">
-          <Input name="codigo" defaultValue={materia.codigo} required />
-        </Field>
-        <Field label="Descrição">
-          <Textarea name="descricao" defaultValue={materia.descricao} />
-        </Field>
-        <div className="flex flex-wrap gap-4">
-          <Field label="Carga horária">
-            <Input name="carga_horaria" type="number" min={0} defaultValue={materia.carga_horaria} className="w-24" />
-          </Field>
-          <Field label="Nota mínima da prova">
-            <Input name="nota_minima" type="number" min={0} max={10} step="0.1" defaultValue={materia.nota_minima} className="w-24" />
-          </Field>
-          <Field label="Validade (dias)">
-            <Input name="validade_dias" type="number" min={1} step={1} placeholder="Ex.: 90" defaultValue={materia.validade_dias ?? ""} className="w-24" />
-          </Field>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="ativo" defaultChecked={materia.ativo} />
-          Matéria ativa
-        </label>
-        <SubmitButton>Salvar matéria</SubmitButton>
-      </ActionForm>
-      <section className="max-w-3xl space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Conteúdo</h2>
+    <div className="flex w-full max-w-5xl flex-col gap-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Editar matéria</h1>
+        <Link
+          href="/secretaria/materias"
+          className="inline-flex h-10 items-center justify-center rounded-md border bg-white px-4 text-sm font-medium hover:bg-secondary"
+        >
+          Voltar à lista
+        </Link>
+      </div>
+
+      <Card>
+        <ActionForm action={salvarMateria} className="flex flex-col gap-4">
+          <input type="hidden" name="id" value={materia.id} />
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div className="grid gap-1">
+              <CardTitle>Informações da matéria</CardTitle>
+              <CardDescription>Alterações são salvas ao clicar em Salvar.</CardDescription>
+            </div>
+            <InterruptorForm name="ativo" rotulo="Matéria ativa" defaultChecked={materia.ativo} />
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <Field label="Nome">
+                <Input name="nome" defaultValue={materia.nome} required />
+              </Field>
+            </div>
+            <Field label="Slug">
+              <Input name="slug" defaultValue={materia.slug} required />
+            </Field>
+            <Field label="Carga horária">
+              <Input name="carga_horaria" type="number" min={0} defaultValue={materia.carga_horaria} />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Descrição">
+                <Textarea name="descricao" defaultValue={materia.descricao} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-4 gap-3 sm:col-span-2">
+              <Field label="Nota mínima da prova">
+                <Input name="nota_minima" type="number" min={0} max={10} step="0.1" defaultValue={materia.nota_minima} />
+              </Field>
+              <Field label="Questões na prova">
+                <Input name="prova_quantidade" type="number" min={1} max={100} step={1} placeholder="Todas" defaultValue={materia.prova_quantidade ?? ""} />
+              </Field>
+              <Field label="Tempo (minutos)">
+                <Input name="prova_duracao_minutos" type="number" min={5} max={240} step={1} defaultValue={materia.prova_duracao_minutos ?? 60} required />
+              </Field>
+              <Field label="Validade (dias)">
+                <Input name="validade_dias" type="number" min={1} step={1} placeholder="Ex.: 90" defaultValue={materia.validade_dias ?? ""} />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <SubmitButton>Salvar matéria</SubmitButton>
+            </div>
+            </div>
+          </CardContent>
+        </ActionForm>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardTitle>Conteúdo</CardTitle>
           <div className="flex gap-2">
             <ActionForm action={salvarTopico}>
               <input type="hidden" name="materia_id" value={materia.id} />
@@ -117,8 +159,8 @@ export default async function MateriaDetalhePage({
               <SubmitButton size="sm" variant="outline">Nova aula</SubmitButton>
             </ActionForm>
           </div>
-        </div>
-        <p className="text-sm text-muted-foreground">Arraste para mudar a posição. A aula fica na seção que estiver acima dela. Tópicos e questionários ficam dentro da aula.</p>
+        </CardHeader>
+        <CardContent>
         <SequenciaAulas
           materiaId={materia.id}
           itens={raiz.map((item) => {
@@ -129,7 +171,6 @@ export default async function MateriaDetalhePage({
                 id: item.quiz.id,
                 titulo: item.quiz.titulo,
                 encerra: item.quiz.encerra_materia,
-                notaMinima: item.quiz.nota_minima == null ? "" : String(item.quiz.nota_minima),
                 questoes: questoesDe(item.quiz.id),
               };
             }
@@ -143,33 +184,11 @@ export default async function MateriaDetalhePage({
               epubNome: item.aula.epub_nome,
               epubPath: item.aula.epub_path,
               arquivos: arquivosLista.filter((arquivo) => arquivo.aula_id === item.aula.id && !arquivo.topico_id),
-              topicos: (topicosAula ?? [])
-                .filter((topico) => topico.aula_id === item.aula.id)
-                .map((topico) => ({
-                  id: topico.id,
-                  titulo: topico.titulo,
-                  conteudo: topico.conteudo ?? "",
-                  video: videoDe(topico.youtube_id, topico.bunny_video_id),
-                  liberaEm: campoDataHora(topico.libera_em),
-                  epubNome: topico.epub_nome,
-                  epubPath: topico.epub_path,
-                  posicao: Number(topico.posicao),
-                  arquivos: arquivosLista.filter((arquivo) => arquivo.topico_id === topico.id),
-                })),
-              questionarios: quizzes
-                .filter((quiz) => quiz.aula_id === item.aula.id)
-                .map((quiz) => ({
-                  id: quiz.id,
-                  titulo: quiz.titulo,
-                  encerra: quiz.encerra_materia,
-                  notaMinima: quiz.nota_minima == null ? "" : String(quiz.nota_minima),
-                  posicao: Number(quiz.posicao),
-                  questoes: questoesDe(quiz.id),
-                })),
             };
           })}
         />
-      </section>
+        </CardContent>
+      </Card>
     </div>
   );
 }

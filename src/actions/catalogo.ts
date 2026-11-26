@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/session";
 import { horarioBrasilia, idYoutube } from "@/lib/ebd";
+import { lerQuizXml } from "@/lib/quiz-xml";
 import { slugify } from "@/lib/slug";
 import type { FormState } from "@/lib/form-state";
 import { sincronizarCategoriasDoProduto } from "@/actions/produto-categoria";
@@ -31,27 +32,38 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
   const supabase = await createClient();
   const id = String(formData.get("id") ?? "");
   const nome = String(formData.get("nome") ?? "").trim();
-  const codigo = String(formData.get("codigo") ?? "").trim();
+  const slug = String(formData.get("slug") ?? "").trim();
   const descricao = String(formData.get("descricao") ?? "").trim();
   const carga = Number(formData.get("carga_horaria") ?? 0);
   const nota = Number(formData.get("nota_minima") ?? 7);
   const validadeInformada = String(formData.get("validade_dias") ?? "").trim();
   const validadeDias = validadeInformada === "" ? null : Number(validadeInformada);
+  const quantidadeInformada = String(formData.get("prova_quantidade") ?? "").trim();
+  const provaQuantidade = quantidadeInformada === "" ? null : Number(quantidadeInformada);
+  const duracao = Number(formData.get("prova_duracao_minutos") ?? 60);
   const ativa = formData.get("ativo") === "on";
 
-  if (!nome || !codigo) return { error: "Informe o nome e o código da matéria." };
+  if (!nome || !slug) return { error: "Informe o nome e o slug da matéria." };
   if (Number.isNaN(nota) || nota < 0 || nota > 10) return { error: "A nota mínima fica entre 0 e 10." };
   if (validadeDias != null && (!Number.isInteger(validadeDias) || validadeDias < 1)) {
     return { error: "Informe a validade em dias inteiros, como 90." };
   }
+  if (provaQuantidade != null && (!Number.isInteger(provaQuantidade) || provaQuantidade < 1 || provaQuantidade > 100)) {
+    return { error: "A prova fica entre 1 e 100 questões." };
+  }
+  if (!Number.isInteger(duracao) || duracao < 5 || duracao > 240) {
+    return { error: "O tempo da prova fica entre 5 e 240 minutos." };
+  }
 
   const payload = {
     nome,
-    codigo,
+    slug,
     descricao,
     carga_horaria: Number.isFinite(carga) ? carga : 0,
     nota_minima: nota,
     validade_dias: validadeDias,
+    prova_quantidade: provaQuantidade,
+    prova_duracao_minutos: duracao,
     ativo: ativa,
   };
 
@@ -65,7 +77,10 @@ export async function salvarMateria(_prev: FormState, formData: FormData): Promi
     ? await supabase.from("materia").update(payload).eq("id", id).select("id").single()
     : await supabase.from("materia").insert({ ...payload, ordem }).select("id").single();
 
-  if (error || !criada) return { error: error ? dbMessage(error) : "Não foi possível salvar a matéria." };
+  if (error || !criada) {
+    if (error?.code === "23505") return { error: "Já existe uma matéria com este slug." };
+    return { error: error ? dbMessage(error) : "Não foi possível salvar a matéria." };
+  }
   revalidatePath("/secretaria/materias");
   revalidatePath(`/secretaria/materias/${criada.id}`);
   return { ok: id ? "Matéria atualizada." : "Matéria criada." };
@@ -403,6 +418,57 @@ export async function salvarQuestao(_prev: FormState, formData: FormData): Promi
   return { ok: "Questão adicionada." };
 }
 
+export async function atualizarQuestao(
+  materiaId: string,
+  questaoId: string,
+  enunciado: string,
+  alternativas: { texto: string; correta: boolean }[]
+): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const texto = enunciado.trim();
+  const itens = alternativas
+    .map((item) => ({ texto: item.texto.trim(), correta: item.correta }))
+    .filter((item) => item.texto)
+    .slice(0, 6);
+  if (!texto) return { error: "Informe o enunciado." };
+  if (itens.length < 2) return { error: "Informe pelo menos duas alternativas." };
+  if (itens.filter((item) => item.correta).length !== 1) return { error: "Marque exatamente uma alternativa correta." };
+
+  const { data: questao } = await supabase.from("questao").select("id").eq("id", questaoId).eq("materia_id", materiaId).maybeSingle();
+  if (!questao) return { error: "Questão não encontrada." };
+
+  const { error: erroEnunciado } = await supabase.from("questao").update({ enunciado: texto }).eq("id", questaoId);
+  if (erroEnunciado) return { error: dbMessage(erroEnunciado) };
+
+  const { data: antigas } = await supabase.from("alternativa").select("id").eq("questao_id", questaoId);
+  const { error: erroNovas } = await supabase.from("alternativa").insert(
+    itens.map((item, indice) => ({
+      questao_id: questaoId,
+      texto: item.texto,
+      correta: item.correta,
+      ordem: indice + 1,
+    }))
+  );
+  if (erroNovas) return { error: dbMessage(erroNovas) };
+  if (antigas?.length) {
+    const { error: erroAntigas } = await supabase.from("alternativa").delete().in("id", antigas.map((item) => item.id));
+    if (erroAntigas) return { error: dbMessage(erroAntigas) };
+  }
+
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: true };
+}
+
+export async function excluirQuestaoId(materiaId: string, questaoId: string): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase.from("questao").delete().eq("id", questaoId).eq("materia_id", materiaId);
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: true };
+}
+
 export async function excluirQuestao(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireAdmin();
   const supabase = await createClient();
@@ -631,21 +697,124 @@ export async function salvarQuestionario(_prev: FormState, formData: FormData): 
   const id = String(formData.get("id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
   const titulo = String(formData.get("titulo") ?? "").trim();
-  const notaInformada = String(formData.get("nota_minima") ?? "").trim();
   const encerra = formData.get("encerra_materia") === "on";
   if (!titulo) return { error: "Informe o título do questionário." };
-  let nota: number | null = null;
-  if (notaInformada) {
-    nota = Number(notaInformada);
-    if (Number.isNaN(nota) || nota < 0 || nota > 10) return { error: "A nota mínima fica entre 0 e 10." };
-  }
   if (encerra) {
     await supabase.from("questionario").update({ encerra_materia: false }).eq("materia_id", materiaId).neq("id", id);
   }
-  const { error } = await supabase.from("questionario").update({ titulo, nota_minima: nota, encerra_materia: encerra }).eq("id", id);
+  const { error } = await supabase.from("questionario").update({ titulo, nota_minima: null, encerra_materia: encerra }).eq("id", id);
   if (error) return { error: dbMessage(error) };
   revalidatePath(`/secretaria/materias/${materiaId}`);
   return { ok: "Questionário salvo." };
+}
+
+export async function alternarQuestaoAtiva(
+  materiaId: string,
+  questaoId: string,
+  ativo: boolean
+): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const { error } = await supabase.from("questao").update({ ativo }).eq("id", questaoId).eq("materia_id", materiaId);
+  if (error) return { error: dbMessage(error) };
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  return { ok: true };
+}
+
+export async function importarQuestoesXml(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireAdmin();
+  const supabase = await createClient();
+  const materiaId = String(formData.get("materia_id") ?? "");
+  const questionarioInformado = String(formData.get("questionario_id") ?? "");
+  const arquivo = formData.get("arquivo");
+  if (!materiaId) return { error: "Matéria não informada." };
+  if (!(arquivo instanceof File) || arquivo.size === 0) return { error: "Escolha um arquivo XML." };
+  if (arquivo.size > 8 * 1024 * 1024) return { error: "O arquivo XML passa de 8 MB." };
+  if (arquivo.name && !arquivo.name.toLowerCase().endsWith(".xml")) return { error: "O arquivo precisa ser XML." };
+
+  const lido = lerQuizXml(await arquivo.text());
+  if ("error" in lido) return { error: lido.error };
+
+  const { data: materia } = await supabase.from("materia").select("id").eq("id", materiaId).maybeSingle();
+  if (!materia) return { error: "Matéria não encontrada." };
+
+  let questionarioId = questionarioInformado;
+  let criouQuestionario = false;
+  if (questionarioId) {
+    const { data: questionario } = await supabase.from("questionario").select("id, materia_id").eq("id", questionarioId).maybeSingle();
+    if (!questionario || questionario.materia_id !== materiaId) return { error: "Questionário não encontrado nesta matéria." };
+  } else {
+    const { count } = await supabase
+      .from("questionario")
+      .select("id", { count: "exact", head: true })
+      .eq("materia_id", materiaId)
+      .eq("encerra_materia", true);
+    const { data: criado, error } = await supabase
+      .from("questionario")
+      .insert({
+        materia_id: materiaId,
+        titulo: lido.quiz.titulo,
+        posicao: await reservarPosicao(supabase, materiaId),
+        encerra_materia: (count ?? 0) === 0,
+      })
+      .select("id")
+      .single();
+    if (error || !criado) return { error: error ? dbMessage(error) : "Não foi possível criar o questionário." };
+    questionarioId = criado.id as string;
+    criouQuestionario = true;
+  }
+
+  const { data: ultima } = await supabase
+    .from("questao")
+    .select("ordem")
+    .eq("materia_id", materiaId)
+    .order("ordem", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const inicio = Number(ultima?.ordem ?? 0);
+  const linhas = lido.quiz.questoes.map((questao, indice) => ({
+    materia_id: materiaId,
+    questionario_id: questionarioId,
+    enunciado: questao.enunciado,
+    ordem: inicio + indice + 1,
+  }));
+
+  const { data: criadas, error: erroQuestoes } = await supabase.from("questao").insert(linhas).select("id, ordem");
+  if (erroQuestoes || !criadas?.length) {
+    if (criouQuestionario) await supabase.from("questionario").delete().eq("id", questionarioId);
+    return { error: erroQuestoes ? dbMessage(erroQuestoes) : "Não foi possível salvar as questões." };
+  }
+
+  const idPorOrdem = new Map(criadas.map((item) => [Number(item.ordem), item.id as string]));
+  const alternativas = lido.quiz.questoes.flatMap((questao, indice) => {
+    const questaoId = idPorOrdem.get(inicio + indice + 1);
+    return questao.alternativas.map((alternativa, posicao) => ({
+      questao_id: questaoId,
+      texto: alternativa.texto,
+      correta: alternativa.correta,
+      ordem: posicao + 1,
+    }));
+  });
+
+  if (alternativas.some((item) => !item.questao_id)) {
+    await supabase.from("questao").delete().in("id", criadas.map((item) => item.id));
+    if (criouQuestionario) await supabase.from("questionario").delete().eq("id", questionarioId);
+    return { error: "Não foi possível vincular as alternativas." };
+  }
+
+  const { error: erroAlternativas } = await supabase.from("alternativa").insert(alternativas);
+  if (erroAlternativas) {
+    await supabase.from("questao").delete().in("id", criadas.map((item) => item.id));
+    if (criouQuestionario) await supabase.from("questionario").delete().eq("id", questionarioId);
+    return { error: dbMessage(erroAlternativas) };
+  }
+
+  revalidatePath(`/secretaria/materias/${materiaId}`);
+  const total = lido.quiz.questoes.length;
+  if (criouQuestionario) {
+    return { ok: `Questionário “${lido.quiz.titulo}” criado com ${total} ${total === 1 ? "questão" : "questões"}.` };
+  }
+  return { ok: total === 1 ? "1 questão adicionada ao questionário." : `${total} questões adicionadas ao questionário.` };
 }
 
 export async function excluirQuestionario(_prev: FormState, formData: FormData): Promise<FormState> {

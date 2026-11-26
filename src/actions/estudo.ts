@@ -3,10 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getSession } from "@/lib/session";
 import { siteUrl } from "@/lib/site";
 import { precoVigente } from "@/lib/preco";
 import type { FormState } from "@/lib/form-state";
+import { mensagemResultado } from "@/lib/prova-mensagem";
+import { um } from "@/lib/relacao";
 
 type ItemPedido = { produtoId: string; variacaoId: string | null };
 
@@ -140,28 +143,46 @@ export async function marcarAulaVista(_prev: FormState, formData: FormData): Pro
   if (!session || session.type !== "aluno") return { error: "Entre com a conta de aluno." };
   const aulaId = String(formData.get("aula_id") ?? "");
   const topicoId = String(formData.get("topico_id") ?? "");
-  const supabase = await createClient();
-  const { error } = topicoId
-    ? await supabase.from("topico_progresso").upsert({
-        aluno_id: session.user.id,
-        topico_id: topicoId,
-        video_concluido: true,
-        atualizado_em: new Date().toISOString(),
-      })
-    : await supabase.from("aula_progresso").upsert({
-        aluno_id: session.user.id,
-        aula_id: aulaId,
-        video_concluido: true,
-        atualizado_em: new Date().toISOString(),
-      });
-  if (error) return { error: error.message };
   const matriculaId = String(formData.get("matricula_id") ?? "");
   const materiaId = String(formData.get("materia_id") ?? "");
+  const supabase = await createClient();
+  let statusAntes: string | null = null;
+  if (!topicoId && matriculaId && materiaId) {
+    const { data } = await supabase
+      .from("matricula_materia")
+      .select("status")
+      .eq("matricula_id", matriculaId)
+      .eq("materia_id", materiaId)
+      .maybeSingle();
+    statusAntes = (data?.status as string | undefined) ?? null;
+  }
+  if (!aulaId) return { error: "Aula não encontrada." };
+  const { error } = await supabase.from("aula_progresso").upsert({
+    aluno_id: session.user.id,
+    aula_id: aulaId,
+    video_concluido: true,
+    atualizado_em: new Date().toISOString(),
+  });
+  if (error) return { error: error.message };
+  let materiaConcluida = false;
+  if (!topicoId && matriculaId && materiaId && statusAntes && statusAntes !== "concluida") {
+    const { data } = await supabase
+      .from("matricula_materia")
+      .select("status")
+      .eq("matricula_id", matriculaId)
+      .eq("materia_id", materiaId)
+      .maybeSingle();
+    materiaConcluida = data?.status === "concluida";
+  }
   if (aulaId) revalidatePath(`/aula/${aulaId}`);
   if (topicoId) revalidatePath(`/topico/${topicoId}`);
   if (matriculaId && materiaId) revalidatePath(`/meus-cursos/${matriculaId}/${materiaId}`);
   if (materiaId) revalidatePath(`/meus-cursos/aberto/${materiaId}`);
-  return { ok: topicoId ? "Tópico marcado como concluído." : "Aula marcada como assistida." };
+  revalidatePath("/meus-cursos", "layout");
+  if (materiaConcluida) {
+    return { ok: "Aula marcada como assistida. Matéria concluída e a próxima da sequência foi liberada, se houver vaga." };
+  }
+  return { ok: "Aula marcada como assistida." };
 }
 
 export async function salvarProgressoEbook(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -170,23 +191,14 @@ export async function salvarProgressoEbook(_prev: FormState, formData: FormData)
   const aulaId = String(formData.get("aula_id") ?? "");
   const topicoId = String(formData.get("topico_id") ?? "");
   const cfi = String(formData.get("cfi") ?? "");
-  if (!cfi || (!aulaId && !topicoId)) return null;
+  if (!cfi || !aulaId) return null;
   const supabase = await createClient();
-  if (topicoId) {
-    await supabase.from("topico_progresso").upsert({
-      aluno_id: session.user.id,
-      topico_id: topicoId,
-      ebook_cfi: cfi,
-      atualizado_em: new Date().toISOString(),
-    });
-  } else {
-    await supabase.from("aula_progresso").upsert({
-      aluno_id: session.user.id,
-      aula_id: aulaId,
-      ebook_cfi: cfi,
-      atualizado_em: new Date().toISOString(),
-    });
-  }
+  await supabase.from("aula_progresso").upsert({
+    aluno_id: session.user.id,
+    aula_id: aulaId,
+    ebook_cfi: cfi,
+    atualizado_em: new Date().toISOString(),
+  });
   return null;
 }
 
@@ -230,4 +242,349 @@ export async function enviarProva(_prev: FormState, formData: FormData): Promise
       ? `Aprovado com ${nota} A próxima matéria foi liberada se ainda havia vaga.`
       : `${nota} A matéria continua aberta para uma nova tentativa.`,
   };
+}
+
+export type ResultadoQuestionario = {
+  nota: number;
+  aprovado: boolean;
+  acertos: number;
+  total: number;
+  mensagem: string;
+  corretas: string[];
+};
+
+type RespostaMarcada = { questao_id: string; alternativa_id: string };
+
+export async function tentativaProvaPendente(alunoId: string, materiaId: string) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("tentativa_prova")
+    .select("id")
+    .eq("aluno_id", alunoId)
+    .eq("materia_id", materiaId)
+    .is("nota", null)
+    .is("iniciada_em", null)
+    .limit(1)
+    .maybeSingle();
+  return Boolean(data);
+}
+
+export async function respostasDaProva(supabase: Awaited<ReturnType<typeof createClient>>, andamentoId: string) {
+  const { data: copias } = await supabase.from("prova_questao").select("id").eq("prova_andamento_id", andamentoId);
+  const ids = (copias ?? []).map((item) => item.id as string);
+  if (ids.length === 0) return [] as RespostaMarcada[];
+  const { data: marcadas } = await supabase.from("prova_resposta").select("prova_questao_id, alternativa_id").in("prova_questao_id", ids);
+  return (marcadas ?? []).map((item) => ({
+    questao_id: item.prova_questao_id as string,
+    alternativa_id: item.alternativa_id as string,
+  }));
+}
+
+export async function gabaritoDaProva(andamentoId: string) {
+  const admin = createServiceRoleClient();
+  if (!admin) return [] as string[];
+  const { data: copias } = await admin.from("prova_questao").select("id").eq("prova_andamento_id", andamentoId);
+  const ids = (copias ?? []).map((item) => item.id as string);
+  if (ids.length === 0) return [] as string[];
+  const { data: gabarito } = await admin.from("prova_questao_alternativa").select("id").eq("correta", true).in("prova_questao_id", ids);
+  return (gabarito ?? []).map((item) => item.id as string);
+}
+
+export async function submeterQuestionario(entrada: {
+  materiaId: string;
+  questionarioId: string;
+  respostas: { questao_id: string; alternativa_id: string }[];
+  porTempo?: boolean;
+}): Promise<{ error: string } | { ok: true; resultado: ResultadoQuestionario }> {
+  const session = await getSession();
+  if (!session || session.type !== "aluno") return { error: "Entre com a conta de aluno." };
+  if (!entrada.materiaId || !entrada.questionarioId) return { error: "Prova inválida." };
+  if (entrada.respostas.length === 0 && !entrada.porTempo) return { error: "Responda as questões antes de enviar." };
+
+  const supabase = await createClient();
+  const { data: questionario } = await supabase
+    .from("questionario")
+    .select("encerra_materia")
+    .eq("id", entrada.questionarioId)
+    .maybeSingle();
+  let sessaoId: string | null = null;
+  if (questionario?.encerra_materia) {
+    const { data: aberta } = await supabase
+      .from("tentativa_prova")
+      .select("id")
+      .eq("aluno_id", session.user.id)
+      .eq("questionario_id", entrada.questionarioId)
+      .is("entregue_em", null)
+      .not("iniciada_em", "is", null)
+      .maybeSingle();
+    if (!aberta) return { error: "Inicie a prova antes de enviar." };
+    sessaoId = aberta.id as string;
+  }
+
+  const { data, error } = await supabase.rpc("submeter_prova", {
+    p_materia_id: entrada.materiaId,
+    p_respostas: entrada.respostas,
+    p_questionario_id: entrada.questionarioId,
+  });
+  if (error) {
+    if (error.message.includes("sem questoes")) return { error: "Esta matéria ainda não tem prova." };
+    if (error.message.includes("nao iniciada")) return { error: "Inicie a prova antes de enviar." };
+    return { error: "Não foi possível registrar a prova." };
+  }
+
+  const resultado = data as { nota: number; aprovado: boolean; acertos: number; total: number; encerra?: boolean };
+  if (sessaoId) {
+    await supabase
+      .from("tentativa_prova")
+      .update({
+        entregue_em: new Date().toISOString(),
+        nota: resultado.nota,
+        acertos: resultado.acertos,
+        total: resultado.total,
+        aprovado: resultado.aprovado,
+      })
+      .eq("id", sessaoId)
+      .is("entregue_em", null);
+  }
+  const admin = createServiceRoleClient();
+  let corretas: string[] = [];
+  if (sessaoId) {
+    corretas = await gabaritoDaProva(sessaoId);
+  } else {
+    const ids = entrada.respostas.map((item) => item.questao_id);
+    if (admin && ids.length > 0) {
+      const { data: gabarito } = await admin.from("alternativa").select("id, questao_id").in("questao_id", ids).eq("correta", true);
+      corretas = (gabarito ?? []).map((item) => item.id as string);
+    }
+  }
+
+  revalidatePath("/meus-cursos");
+  revalidatePath(`/prova/${entrada.materiaId}`);
+  revalidatePath(`/questionario/${entrada.questionarioId}`);
+  const mensagem = mensagemResultado(resultado.nota, resultado.acertos, resultado.total, resultado.aprovado, resultado.encerra);
+
+  return {
+    ok: true,
+    resultado: {
+      nota: resultado.nota,
+      aprovado: resultado.aprovado,
+      acertos: resultado.acertos,
+      total: resultado.total,
+      mensagem,
+      corretas,
+    },
+  };
+}
+
+type QuestaoProvaDto = {
+  id: string;
+  enunciado: string;
+  ordem: number;
+  alternativas: { id: string; texto: string; ordem: number }[];
+};
+
+export async function iniciarProva(questionarioId: string): Promise<
+  | { error: string }
+  | {
+      ok: true;
+      concluida?: boolean;
+      expiraEm: string;
+      servidorAgora: string;
+      duracaoMinutos: number;
+      respostas: RespostaMarcada[];
+      questoes: QuestaoProvaDto[];
+      resultado?: ResultadoQuestionario;
+      codigo: string | null;
+    }
+> {
+  const session = await getSession();
+  if (!session || session.type !== "aluno") return { error: "Entre com a conta de aluno." };
+  const supabase = await createClient();
+  const { data: questionario } = await supabase
+    .from("questionario")
+    .select("id, materia_id, encerra_materia, materia:materia_id(prova_duracao_minutos)")
+    .eq("id", questionarioId)
+    .maybeSingle();
+  if (!questionario?.encerra_materia) return { error: "Este questionário não usa tempo." };
+
+  const materia = Array.isArray(questionario.materia) ? questionario.materia[0] : questionario.materia;
+  const duracao = Number((materia as { prova_duracao_minutos?: number } | null)?.prova_duracao_minutos ?? 60);
+  const { data: aberta } = await supabase
+    .from("tentativa_prova")
+    .select("id, expira_em, codigo, iniciada_em")
+    .eq("aluno_id", session.user.id)
+    .eq("questionario_id", questionarioId)
+    .is("entregue_em", null)
+    .not("iniciada_em", "is", null)
+    .maybeSingle();
+
+  const { data: pendente } = await supabase
+    .from("tentativa_prova")
+    .select("id")
+    .eq("aluno_id", session.user.id)
+    .eq("questionario_id", questionarioId)
+    .is("entregue_em", null)
+    .is("iniciada_em", null)
+    .maybeSingle();
+  const novaLiberada = Boolean(pendente) || (await tentativaProvaPendente(session.user.id, questionario.materia_id as string));
+
+  if (!aberta && !novaLiberada) {
+    const { data: concluida } = await supabase
+      .from("tentativa_prova")
+      .select("id, expira_em, nota, acertos, total, aprovado, codigo")
+      .eq("aluno_id", session.user.id)
+      .eq("questionario_id", questionarioId)
+      .not("entregue_em", "is", null)
+      .order("entregue_em", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (concluida) {
+      const { data: questoes } = await supabase.rpc("questoes_do_andamento", { p_andamento: concluida.id });
+      const nota = Number(concluida.nota ?? 0);
+      const acertos = Number(concluida.acertos ?? 0);
+      const total = Number(concluida.total ?? 0);
+      const aprovado = Boolean(concluida.aprovado);
+      return {
+        ok: true,
+        concluida: true,
+        expiraEm: concluida.expira_em as string,
+        servidorAgora: new Date().toISOString(),
+        duracaoMinutos: duracao,
+        codigo: (concluida.codigo as string | null) ?? null,
+        respostas: await respostasDaProva(supabase, concluida.id as string),
+        questoes: (questoes ?? []) as QuestaoProvaDto[],
+        resultado: {
+          nota,
+          aprovado,
+          acertos,
+          total,
+          mensagem: mensagemResultado(nota, acertos, total, aprovado, true),
+          corretas: await gabaritoDaProva(concluida.id as string),
+        },
+      };
+    }
+  }
+
+  let andamentoId = aberta?.id as string | undefined;
+  let expiraEm = aberta?.expira_em as string | undefined;
+  let codigoProva = (aberta?.codigo as string | null | undefined) ?? null;
+  const duracaoMinutos = duracao;
+
+  if (!aberta) {
+    const inicio = new Date();
+    const expira = new Date(inicio.getTime() + duracao * 60_000);
+    const adminVinculo = createServiceRoleClient() ?? supabase;
+    const { data: vinculos } = await adminVinculo
+      .from("matricula_materia")
+      .select("matricula_id, matricula:matricula_id(aluno_id)")
+      .eq("materia_id", questionario.materia_id)
+      .in("status", ["liberada", "concluida"]);
+    const linhaVinculo = (vinculos ?? []).find((item) => {
+      const matricula = um(item.matricula as { aluno_id: string } | { aluno_id: string }[] | null);
+      return matricula?.aluno_id === session.user.id;
+    });
+    const pendenteId =
+      (pendente?.id as string | undefined) ??
+      (
+        await supabase
+          .from("tentativa_prova")
+          .select("id")
+          .eq("aluno_id", session.user.id)
+          .eq("materia_id", questionario.materia_id)
+          .is("nota", null)
+          .is("iniciada_em", null)
+          .limit(1)
+          .maybeSingle()
+      ).data?.id;
+    if (pendenteId) {
+      const { data: atualizada, error } = await supabase
+        .from("tentativa_prova")
+        .update({
+          iniciada_em: inicio.toISOString(),
+          expira_em: expira.toISOString(),
+          questionario_id: questionarioId,
+        })
+        .eq("id", pendenteId)
+        .select("id, expira_em, codigo")
+        .maybeSingle();
+      if (error) return { error: "Não foi possível iniciar a prova." };
+      andamentoId = (atualizada?.id as string | undefined) ?? pendenteId;
+      expiraEm = (atualizada?.expira_em as string | undefined) ?? expira.toISOString();
+      codigoProva = (atualizada?.codigo as string | null | undefined) ?? null;
+    } else {
+      const { data: criada, error } = await supabase
+        .from("tentativa_prova")
+        .insert({
+          aluno_id: session.user.id,
+          materia_id: questionario.materia_id,
+          matricula_id: linhaVinculo?.matricula_id ?? null,
+          questionario_id: questionarioId,
+          iniciada_em: inicio.toISOString(),
+          expira_em: expira.toISOString(),
+        })
+        .select("id, expira_em, codigo")
+        .maybeSingle();
+      if (error && error.code !== "23505") return { error: "Não foi possível iniciar a prova." };
+      if (criada) {
+        andamentoId = criada.id as string;
+        expiraEm = criada.expira_em as string;
+        codigoProva = (criada.codigo as string | null) ?? null;
+      } else {
+        const { data: existente } = await supabase
+          .from("tentativa_prova")
+          .select("id, expira_em, codigo")
+          .eq("aluno_id", session.user.id)
+          .eq("questionario_id", questionarioId)
+          .is("entregue_em", null)
+          .not("iniciada_em", "is", null)
+          .maybeSingle();
+        if (!existente) return { error: "Não foi possível iniciar a prova." };
+        andamentoId = existente.id as string;
+        expiraEm = existente.expira_em as string;
+        codigoProva = (existente.codigo as string | null) ?? null;
+      }
+    }
+  }
+
+  if (!andamentoId || !expiraEm) return { error: "Não foi possível iniciar a prova." };
+  const admin = createServiceRoleClient();
+  if (admin) {
+    const { error: montarErro } = await admin.rpc("montar_prova_andamento", { p_andamento: andamentoId });
+    if (montarErro) return { error: "Não foi possível montar as questões da prova." };
+  }
+
+  const { data: questoes, error: erroQuestoes } = await supabase.rpc("questoes_do_andamento", {
+    p_andamento: andamentoId,
+  });
+  const respostas = await respostasDaProva(supabase, andamentoId);
+  if (erroQuestoes) return { error: "Não foi possível abrir as questões." };
+  return {
+    ok: true,
+    expiraEm,
+    servidorAgora: new Date().toISOString(),
+    duracaoMinutos,
+    codigo: codigoProva,
+    respostas,
+    questoes: (questoes ?? []) as { id: string; enunciado: string; ordem: number; alternativas: { id: string; texto: string; ordem: number }[] }[],
+  };
+}
+
+export async function salvarRespostaProva(
+  questionarioId: string,
+  questaoId: string,
+  alternativaId: string
+): Promise<{ ok: true } | { error: string }> {
+  const session = await getSession();
+  if (!session || session.type !== "aluno") return { error: "Entre com a conta de aluno." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("salvar_resposta_prova", {
+    p_questionario_id: questionarioId,
+    p_prova_questao_id: questaoId,
+    p_alternativa_id: alternativaId,
+  });
+  if (error) {
+    if (error.message.includes("tempo")) return { error: "O tempo da prova terminou." };
+    return { error: "Não foi possível gravar a resposta." };
+  }
+  return { ok: true };
 }

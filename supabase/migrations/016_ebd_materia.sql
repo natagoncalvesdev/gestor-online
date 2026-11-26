@@ -15,7 +15,7 @@ begin
   select id into produto_ebd from produto where escola_dominical limit 1;
 
   if materia_ebd is null and produto_ebd is not null then
-    insert into materia (nome, codigo, descricao, escola_dominical, ordem)
+    insert into materia (nome, slug, descricao, escola_dominical, ordem)
     values ('Escola Bíblica Dominical', 'EBD', 'Material gratuito para todos os alunos.', true, 0)
     returning id into materia_ebd;
   end if;

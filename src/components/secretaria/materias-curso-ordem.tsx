@@ -12,7 +12,7 @@ export function MateriasCursoOrdem({
   itens,
 }: {
   produtoId: string;
-  itens: { id: string; nome: string; codigo: string }[];
+  itens: { id: string; nome: string; slug: string }[];
 }) {
   const [lista, setLista] = useState(itens);
   const [arrastando, setArrastando] = useState<string | null>(null);
@@ -74,7 +74,7 @@ export function MateriasCursoOrdem({
         </div>
       </td>
       <td className="px-4 py-1.5 font-medium">{item.nome}</td>
-      <td className="px-4 py-1.5 text-muted-foreground">{item.codigo}</td>
+      <td className="px-4 py-1.5 text-muted-foreground">{item.slug}</td>
       <td className="px-4 py-1.5 text-right">
         <ActionForm action={removerMateriaProduto}>
           <input type="hidden" name="produto_id" value={produtoId} />

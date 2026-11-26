@@ -7,6 +7,7 @@ import {
   concluirMateriaMatricula,
   desmatricularMateriaMatricula,
   liberarMateria,
+  liberarNovaTentativaProva,
   matricularMateria,
   matricularSequencia,
   reiniciarMateriaMatricula,
@@ -18,6 +19,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/field";
+import { NotaComTentativas, type TentativaProvaInfo } from "@/components/estudo/nota-tentativas";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -49,11 +51,15 @@ export type LinhaCursoAluno = {
   mostrarAcoesProduto: boolean;
   gratuita: boolean;
   ordemMateria: number;
+  emAndamento: boolean;
+  tentativasProva: TentativaProvaInfo[];
+  provaNovaTentativa: boolean;
 };
 
 const ROTULO_MATERIA = {
   bloqueada: { texto: "Aguardando", classe: "bg-secondary text-muted-foreground" },
   liberada: { texto: "Matriculado", classe: "bg-[#dbeafe] text-[#1e6eb8]" },
+  andamento: { texto: "Andamento", classe: "bg-amber-100 text-amber-900" },
   concluida: { texto: "Concluída", classe: "bg-emerald-100 text-emerald-800" },
   desmatriculada: { texto: "Encerrado", classe: "bg-rose-100 text-rose-800" },
   aprovado: { texto: "Aprovado", classe: "bg-emerald-100 text-emerald-800" },
@@ -64,6 +70,7 @@ function rotuloStatus(linha: LinhaCursoAluno): { texto: string; classe: string }
   if (linha.statusMateria === "desmatriculada") return ROTULO_MATERIA.desmatriculada;
   if (linha.statusMateria === "bloqueada") return ROTULO_MATERIA.bloqueada;
   if (linha.statusMateria === "concluida") return ROTULO_MATERIA.concluida;
+  if (linha.emAndamento && linha.statusMateria === "liberada") return ROTULO_MATERIA.andamento;
   if (linha.resultadoProva === "aprovado") return ROTULO_MATERIA.aprovado;
   if (linha.resultadoProva === "reprovado") return ROTULO_MATERIA.reprovado;
   if (linha.statusMateria === "liberada") return ROTULO_MATERIA.liberada;
@@ -82,6 +89,7 @@ export function CursosAluno({
   cursos,
   materiasDisponiveis,
   sequenciasDisponiveis,
+  sequenciaAtiva,
   sequenciasMatriculadas,
   podeEditarMatricula,
 }: {
@@ -94,6 +102,7 @@ export function CursosAluno({
     produtoNome: string;
   }[];
   sequenciasDisponiveis: { id: string; nome: string }[];
+  sequenciaAtiva: { matriculaId: string; nome: string } | null;
   sequenciasMatriculadas: SequenciaMatriculada[];
   podeEditarMatricula: boolean;
 }) {
@@ -133,7 +142,7 @@ export function CursosAluno({
           {lista.length === 0 ? (
             <p className="px-4 py-6 text-sm text-muted-foreground">Nenhuma matéria matriculada.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overflow-y-visible">
               <table className="w-full min-w-[1040px] text-sm leading-snug">
                 <colgroup>
                   <col className="min-w-[13rem] w-[22%]" />
@@ -219,19 +228,42 @@ export function CursosAluno({
                             ) : null}
                           </div>
                         </td>
-                        <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{linha.prova}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">
+                          <div className="flex flex-nowrap items-center gap-2">
+                            <NotaComTentativas nota={linha.prova} tentativas={linha.tentativasProva} />
+                            {linha.tentativasProva.length > 0 && matriculaAtiva ? (
+                              linha.provaNovaTentativa ? (
+                                <span className="text-[11px] font-medium text-amber-800">Nova tentativa liberada</span>
+                              ) : (
+                                <ActionForm action={liberarNovaTentativaProva} className="contents">
+                                  <input type="hidden" name="aluno_id" value={alunoId} />
+                                  <input type="hidden" name="matricula_materia_id" value={linha.id} />
+                                  <SubmitButton
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 shrink-0 whitespace-nowrap px-2 text-[11px]"
+                                    pendingLabel="..."
+                                  >
+                                    Nova tentativa
+                                  </SubmitButton>
+                                </ActionForm>
+                              )
+                            ) : null}
+                          </div>
+                        </td>
                         <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{formatDate(linha.expiracao)}</td>
                         <td className="px-2 py-1.5 pr-3 align-middle">
                           <div className="flex flex-nowrap items-center gap-1.5">
+                            <div className="flex h-8 w-[5.75rem] shrink-0 items-center">
                             {linha.statusMateria === "bloqueada" && matriculaAtiva ? (
-                              <ActionForm action={liberarMateria} className="contents">
+                              <ActionForm action={liberarMateria} className="w-full">
                                 <input type="hidden" name="aluno_id" value={alunoId} />
                                 <input type="hidden" name="produto_id" value={linha.produtoId} />
                                 <input type="hidden" name="materia_id" value={linha.materiaId} />
                                 <SubmitButton
                                   variant="outline"
                                   size="sm"
-                                  className="shrink-0 whitespace-nowrap"
+                                  className="w-full shrink-0 whitespace-nowrap"
                                   pendingLabel="..."
                                 >
                                   Liberar
@@ -239,19 +271,20 @@ export function CursosAluno({
                               </ActionForm>
                             ) : null}
                             {linha.statusMateria === "liberada" && matriculaAtiva ? (
-                              <ActionForm action={concluirMateriaMatricula} className="contents">
+                              <ActionForm action={concluirMateriaMatricula} className="w-full">
                                 <input type="hidden" name="aluno_id" value={alunoId} />
                                 <input type="hidden" name="matricula_materia_id" value={linha.id} />
                                 <SubmitButton
                                   variant="outline"
                                   size="sm"
-                                  className="shrink-0 whitespace-nowrap"
+                                  className="w-full shrink-0 whitespace-nowrap"
                                   pendingLabel="..."
                                 >
                                   Concluir
                                 </SubmitButton>
                               </ActionForm>
                             ) : null}
+                            </div>
                             {matriculaAtiva && materiaAtiva ? (
                               <ActionForm action={desmatricularMateriaMatricula} className="contents">
                                 <input type="hidden" name="aluno_id" value={alunoId} />
@@ -311,15 +344,26 @@ export function CursosAluno({
           <CardTitle>Sequência</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-fit border-primary text-primary hover:bg-primary/5"
-            onClick={() => setModalSequencia(true)}
-          >
-            + Adicionar sequência
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-fit border-primary text-primary hover:bg-primary/5"
+              disabled={Boolean(sequenciaAtiva) || sequenciasDisponiveis.length === 0}
+              onClick={() => setModalSequencia(true)}
+            >
+              + Adicionar sequência
+            </Button>
+            {sequenciaAtiva ? (
+              <p className="text-sm text-muted-foreground">
+                Sequência ativa: <span className="font-medium text-foreground">{sequenciaAtiva.nome}</span>. Conclua ou remova
+                para adicionar outra.
+              </p>
+            ) : sequenciasDisponiveis.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nenhuma outra sequência disponível para matricular.</p>
+            ) : null}
+          </div>
           {sequenciasMatriculadas.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nenhuma sequência matriculada.</p>
           ) : (
@@ -338,7 +382,7 @@ export function CursosAluno({
                       <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{sequencia.percentual}%</span>
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {sequencia.percentual}% concluído · {sequencia.feitas} de {sequencia.total} etapas
+                      {sequencia.percentual}% concluído · {sequencia.feitas} de {sequencia.total} matérias
                     </p>
                   </div>
                   <ActionForm action={removerSequencia} className="contents">

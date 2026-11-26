@@ -35,11 +35,11 @@ export default async function ProdutoDetalhePage({
     supabase
       .from("produto")
       .select(
-        "id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, gratuita, para_todos, agrupador, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo)), categorias:produto_categoria_produto(categoria_id)",
+        "id, nome, slug, descricao, apresentacao, imagem_path, imagem_zoom, imagem_x, imagem_y, preco, preco_promocional, promocao_ate, peso_gramas, comprimento_cm, largura_cm, altura_cm, materias_simultaneas, ativo, gratuita, para_todos, agrupador, galeria:produto_imagem(id, path, ordem, imagem_zoom, imagem_x, imagem_y), infos:produto_info(id, nome, valor, ordem), vinculos:produto_materia(ordem, materia:materia_id(id, nome, slug)), categorias:produto_categoria_produto(categoria_id)",
       )
       .eq("id", produtoId)
       .maybeSingle(),
-    supabase.from("materia").select("id, nome, codigo").eq("ativo", true).order("ordem"),
+    supabase.from("materia").select("id, nome, slug").eq("ativo", true).order("ordem"),
     supabase
       .from("produto_categoria")
       .select("id, nome, slug, descricao, pai_id, ordem, ativo, sistema")
@@ -57,7 +57,7 @@ export default async function ProdutoDetalhePage({
   const vinculos = lista(
     produto.vinculos as {
       ordem: number;
-      materia: { id: string; nome: string; codigo: string } | { id: string; nome: string; codigo: string }[] | null;
+      materia: { id: string; nome: string; slug: string } | { id: string; nome: string; slug: string }[] | null;
     }[]
   )
     .map((linha) => ({ ordem: linha.ordem, materia: um(linha.materia) }))
@@ -251,7 +251,7 @@ export default async function ProdutoDetalhePage({
                 <tr className="border-b text-left text-muted-foreground">
                   <th className="px-4 py-2 font-medium">Ordem</th>
                   <th className="px-4 py-2 font-medium">Matéria</th>
-                  <th className="px-4 py-2 font-medium">Código</th>
+                  <th className="px-4 py-2 font-medium">Slug</th>
                   <th className="px-4 py-2 text-right font-medium">Ações</th>
                 </tr>
               </thead>
@@ -261,7 +261,7 @@ export default async function ProdutoDetalhePage({
                   itens={vinculos.map((linha) => ({
                     id: linha.materia!.id,
                     nome: linha.materia!.nome,
-                    codigo: linha.materia!.codigo,
+                    slug: linha.materia!.slug,
                   }))}
                 />
               </tbody>
@@ -276,7 +276,7 @@ export default async function ProdutoDetalhePage({
                   <option value="">{disponiveis.length === 0 ? "Todas as matérias já estão no produto" : "Selecione a matéria"}</option>
                   {disponiveis.map((materia) => (
                     <option key={materia.id} value={materia.id}>
-                      {materia.nome} · {materia.codigo}
+                      {materia.nome} · {materia.slug}
                     </option>
                   ))}
                 </Select>

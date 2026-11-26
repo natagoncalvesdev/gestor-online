@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Check } from "lucide-react";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { requireAluno } from "@/lib/session";
@@ -9,7 +10,7 @@ import type { ProdutoCategoriaLinha } from "@/lib/produto-categoria";
 import { formatDate } from "@/lib/format";
 import { lista, um } from "@/lib/relacao";
 
-type MateriaProgresso = { total: number; feitas: number };
+type MateriaProgresso = { total: number; feitas: number; aulasConcluidas: number };
 
 type MateriaLista = {
   chave: string;
@@ -49,7 +50,7 @@ function compararMateria(a: MateriaLista, b: MateriaLista) {
 }
 
 function progressoDaMateria(materiaId: string, porMateria: Map<string, MateriaProgresso>) {
-  return porMateria.get(materiaId) ?? { total: 0, feitas: 0 };
+  return porMateria.get(materiaId) ?? { total: 0, feitas: 0, aulasConcluidas: 0 };
 }
 
 export default async function MeusCursosPage() {
@@ -230,10 +231,10 @@ export default async function MeusCursosPage() {
                   const progresso = progressoDaMateria(item.materiaId, porMateria);
                   const percentual = progresso.total === 0 ? 0 : Math.round((progresso.feitas / progresso.total) * 100);
                   const rotuloStatus =
-                    item.status === "concluida"
-                      ? "Concluída"
-                      : item.status === "bloqueada"
-                        ? "Aguardando liberação"
+                    item.status === "bloqueada"
+                      ? "Aguardando liberação"
+                      : item.status === "liberada" && progresso.aulasConcluidas > 0
+                        ? "Andamento"
                         : null;
                   return (
                     <Link
@@ -241,7 +242,7 @@ export default async function MeusCursosPage() {
                       href={item.href}
                       className="group flex flex-col rounded-2xl border bg-card p-3 shadow-sm"
                     >
-                      <div className="overflow-hidden rounded-xl">
+                      <div className="relative overflow-hidden rounded-xl">
                         <div className="transition-transform duration-300 group-hover:scale-110">
                           {item.capa ? (
                             <CapaProduto src={item.capa} zoom={item.zoom} x={item.x} y={item.y} proporcao="aspect-square w-full" />
@@ -249,6 +250,14 @@ export default async function MeusCursosPage() {
                             <div className="aspect-square w-full bg-secondary" />
                           )}
                         </div>
+                        {progresso.total > 0 && progresso.feitas === progresso.total ? (
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40">
+                            <span className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg">
+                              <Check className="size-8" strokeWidth={3} aria-hidden />
+                            </span>
+                            <span className="sr-only">Matéria concluída</span>
+                          </div>
+                        ) : null}
                       </div>
                       <h3 className="mt-3 line-clamp-2 text-base font-semibold leading-snug">{item.nome}</h3>
                       {item.produtoNome !== item.nome ? (
@@ -291,56 +300,48 @@ async function progressoDasMaterias(
   materiaIds: string[],
 ) {
   const porMateria = new Map<string, MateriaProgresso>();
-  for (const id of materiaIds) porMateria.set(id, { total: 0, feitas: 0 });
+  for (const id of materiaIds) porMateria.set(id, { total: 0, feitas: 0, aulasConcluidas: 0 });
   if (materiaIds.length === 0) return porMateria;
 
   const { data: aulas } = await leitura.from("aula").select("id, materia_id").in("materia_id", materiaIds);
   const linhasAula = (aulas ?? []) as { id: string; materia_id: string }[];
   const aulaIds = linhasAula.map((aula) => aula.id);
-  const materiaDaAula = new Map(linhasAula.map((aula) => [aula.id, aula.materia_id]));
-  const { data: topicos } = aulaIds.length
-    ? await leitura.from("topico").select("id, aula_id").in("aula_id", aulaIds)
-    : { data: [] as { id: string; aula_id: string }[] };
-  const linhasTopico = (topicos ?? []) as { id: string; aula_id: string }[];
   const { data: questionarios } = await leitura.from("questionario").select("id, materia_id").in("materia_id", materiaIds);
   const linhasQuestionario = (questionarios ?? []) as { id: string; materia_id: string }[];
-
-  const topicoIds = linhasTopico.map((topico) => topico.id);
+  const materiaDoQuestionario = new Map(linhasQuestionario.map((item) => [item.id, item.materia_id]));
   const questionarioIds = linhasQuestionario.map((questionario) => questionario.id);
-  const [{ data: progressoAula }, { data: progressoTopico }, { data: tentativas }] = await Promise.all([
+  const [{ data: progressoAula }, { data: tentativas }] = await Promise.all([
     aulaIds.length
       ? aluno.from("aula_progresso").select("aula_id, video_concluido").eq("aluno_id", alunoId).in("aula_id", aulaIds)
       : Promise.resolve({ data: [] }),
-    topicoIds.length
-      ? aluno.from("topico_progresso").select("topico_id, video_concluido").eq("aluno_id", alunoId).in("topico_id", topicoIds)
-      : Promise.resolve({ data: [] }),
-    questionarioIds.length
-      ? aluno.from("tentativa_prova").select("questionario_id").eq("aluno_id", alunoId).eq("aprovado", true).in("questionario_id", questionarioIds)
+    materiaIds.length
+      ? aluno.from("tentativa_prova").select("questionario_id, materia_id, entregue_em, nota").eq("aluno_id", alunoId).in("materia_id", materiaIds)
       : Promise.resolve({ data: [] }),
   ]);
 
   const aulasVistas = new Set(
     ((progressoAula ?? []) as { aula_id: string; video_concluido: boolean }[]).filter((item) => item.video_concluido).map((item) => item.aula_id),
   );
-  const topicosVistos = new Set(
-    ((progressoTopico ?? []) as { topico_id: string; video_concluido: boolean }[]).filter((item) => item.video_concluido).map((item) => item.topico_id),
-  );
-  const quizzesAprovados = new Set(
-    ((tentativas ?? []) as { questionario_id: string | null }[]).map((item) => item.questionario_id).filter((id): id is string => Boolean(id)),
-  );
 
-  function contar(materiaId: string, feita: boolean) {
-    const atual = porMateria.get(materiaId) ?? { total: 0, feitas: 0 };
+  function contar(materiaId: string, feita: boolean, aula = false) {
+    const atual = porMateria.get(materiaId) ?? { total: 0, feitas: 0, aulasConcluidas: 0 };
     atual.total += 1;
     if (feita) atual.feitas += 1;
+    if (aula && feita) atual.aulasConcluidas += 1;
     porMateria.set(materiaId, atual);
   }
 
-  for (const aula of linhasAula) contar(aula.materia_id, aulasVistas.has(aula.id));
-  for (const topico of linhasTopico) {
-    const materiaId = materiaDaAula.get(topico.aula_id);
-    if (materiaId) contar(materiaId, topicosVistos.has(topico.id));
+  for (const aula of linhasAula) contar(aula.materia_id, aulasVistas.has(aula.id), true);
+  for (const item of (tentativas ?? []) as {
+    questionario_id: string | null;
+    materia_id: string | null;
+    entregue_em: string | null;
+    nota: number | null;
+  }[]) {
+    const materiaId = item.materia_id ?? (item.questionario_id ? materiaDoQuestionario.get(item.questionario_id) : undefined);
+    if (!materiaId) continue;
+    const feita = item.entregue_em != null || item.nota != null;
+    contar(materiaId, feita);
   }
-  for (const questionario of linhasQuestionario) contar(questionario.materia_id, quizzesAprovados.has(questionario.id));
   return porMateria;
 }

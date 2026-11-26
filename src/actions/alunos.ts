@@ -149,6 +149,22 @@ export async function matricularSequencia(_prev: FormState, formData: FormData):
   if (erroMaterias) return { error: erroMaterias.message };
   if ((count ?? 0) === 0) return { error: "Esta sequência não tem matérias vinculadas. Cadastre as matérias no produto." };
 
+  const { data: matriculasAtivas } = await supabase
+    .from("matricula")
+    .select("id, produto:produto_id(agrupador, nome)")
+    .eq("aluno_id", alunoId)
+    .eq("status", "ativa");
+  const outraSequencia = (matriculasAtivas ?? []).find((item) => {
+    const p = um(item.produto as { agrupador: boolean; nome: string } | { agrupador: boolean; nome: string }[] | null);
+    return p?.agrupador;
+  });
+  if (outraSequencia) {
+    const nome = um(outraSequencia.produto as { nome: string } | { nome: string }[] | null)?.nome ?? "em andamento";
+    return {
+      error: `Já existe a sequência "${nome}" ativa. Conclua ou remova antes de adicionar outra.`,
+    };
+  }
+
   const { data, error } = await supabase.rpc("criar_matricula", {
     p_aluno_id: alunoId,
     p_produto_id: produtoId,
@@ -159,6 +175,11 @@ export async function matricularSequencia(_prev: FormState, formData: FormData):
   revalidatePath(`/secretaria/alunos/${alunoId}`);
   const payload = data as { criada?: boolean; motivo?: string } | null;
   if (payload?.motivo === "sem_materias") return { error: "Esta sequência não tem matérias vinculadas." };
+  if (payload?.motivo === "sequencia_ativa") {
+    return {
+      error: "Só é permitida uma sequência ativa por vez. Conclua ou remova a sequência atual antes de adicionar outra.",
+    };
+  }
   const criada = Boolean(payload?.criada);
   return criada
     ? { ok: "Sequência matriculada. As matérias foram vinculadas ao aluno." }
@@ -186,12 +207,35 @@ export async function removerSequencia(_prev: FormState, formData: FormData): Pr
 
   const { data: materias, error: erroMaterias } = await supabase
     .from("matricula_materia")
-    .select("id, status")
+    .select("id, status, materia_id")
     .eq("matricula_id", matriculaId);
   if (erroMaterias) return { error: erroMaterias.message };
 
+  const materiaIds = [...new Set((materias ?? []).map((linha) => linha.materia_id as string).filter(Boolean))];
+  const { data: aulas } = materiaIds.length
+    ? await supabase.from("aula").select("id, materia_id").in("materia_id", materiaIds)
+    : { data: [] as { id: string; materia_id: string }[] };
+  const aulaIds = (aulas ?? []).map((aula) => aula.id as string);
+  const { data: aulasConcluidas } = aulaIds.length
+    ? await supabase
+        .from("aula_progresso")
+        .select("aula_id")
+        .eq("aluno_id", alunoId)
+        .eq("video_concluido", true)
+        .in("aula_id", aulaIds)
+    : { data: [] as { aula_id: string }[] };
+  const aulasFeitas = new Set((aulasConcluidas ?? []).map((item) => item.aula_id as string));
+  const materiasEmAndamento = new Set(
+    (aulas ?? []).filter((aula) => aulasFeitas.has(aula.id as string)).map((aula) => aula.materia_id as string),
+  );
+
+  let preservadas = 0;
   for (const linha of materias ?? []) {
     if (linha.status === "desmatriculada") continue;
+    if (linha.status === "concluida" || materiasEmAndamento.has(linha.materia_id as string)) {
+      preservadas += 1;
+      continue;
+    }
     const { data, error } = await supabase.rpc("desmatricular_materia_matricula", {
       p_aluno_id: alunoId,
       p_matricula_materia_id: linha.id,
@@ -202,8 +246,10 @@ export async function removerSequencia(_prev: FormState, formData: FormData): Pr
     if (!payload?.ok) return { error: "Não foi possível desmatricular uma das matérias da sequência." };
   }
 
+  const { data: restantes } = await supabase.from("matricula_materia").select("id, status").eq("matricula_id", matriculaId);
+  const aindaVinculadas = (restantes ?? []).some((linha) => linha.status !== "desmatriculada");
   const { data: matriculaDepois } = await supabase.from("matricula").select("status").eq("id", matriculaId).maybeSingle();
-  if (matriculaDepois?.status !== "cancelada") {
+  if (!aindaVinculadas && matriculaDepois?.status !== "cancelada") {
     const { error } = await supabase.rpc("desmatricular_matricula", {
       p_matricula_id: matriculaId,
       p_aluno_id: alunoId,
@@ -213,6 +259,9 @@ export async function removerSequencia(_prev: FormState, formData: FormData): Pr
 
   revalidatePath(`/secretaria/alunos/${alunoId}`);
   revalidatePath("/meus-cursos", "layout");
+  if (preservadas > 0) {
+    return { ok: "Sequência atualizada. Matérias concluídas ou com aula marcada como concluída foram mantidas." };
+  }
   return { ok: "Sequência removida. As matérias foram desmatriculadas." };
 }
 
@@ -236,6 +285,57 @@ export async function concluirMateriaMatricula(_prev: FormState, formData: FormD
   revalidatePath(`/secretaria/alunos/${alunoId}`);
   revalidatePath("/meus-cursos", "layout");
   return { ok: "Matéria concluída. A próxima na fila foi liberada, se houver vaga." };
+}
+
+export async function liberarNovaTentativaProva(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireInterno();
+  const supabase = await createClient();
+  const alunoId = String(formData.get("aluno_id") ?? "");
+  const matriculaMateriaId = String(formData.get("matricula_materia_id") ?? "");
+  if (!matriculaMateriaId) return { error: "Matéria não encontrada." };
+
+  const { data: vinculo, error } = await supabase
+    .from("matricula_materia")
+    .select("id, materia_id, matricula_id, matricula:matricula_id!inner(aluno_id)")
+    .eq("id", matriculaMateriaId)
+    .eq("matricula.aluno_id", alunoId)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!vinculo) return { error: "Matrícula ou matéria não encontrada." };
+
+  const { data: pendente } = await supabase
+    .from("tentativa_prova")
+    .select("id")
+    .eq("aluno_id", alunoId)
+    .eq("materia_id", vinculo.materia_id)
+    .eq("matricula_id", vinculo.matricula_id)
+    .is("nota", null)
+    .is("iniciada_em", null)
+    .limit(1)
+    .maybeSingle();
+  if (pendente) return { ok: "Nova tentativa de prova já estava liberada." };
+
+  const { data: questionario } = await supabase
+    .from("questionario")
+    .select("id")
+    .eq("materia_id", vinculo.materia_id)
+    .eq("encerra_materia", true)
+    .order("posicao")
+    .limit(1)
+    .maybeSingle();
+
+  const { error: erroInsert } = await supabase.from("tentativa_prova").insert({
+    aluno_id: alunoId,
+    materia_id: vinculo.materia_id,
+    matricula_id: vinculo.matricula_id,
+    questionario_id: questionario?.id ?? null,
+  });
+  if (erroInsert) return { error: erroInsert.message };
+
+  revalidatePath(`/secretaria/alunos/${alunoId}`);
+  revalidatePath("/meus-cursos", "layout");
+  revalidatePath("/questionario", "layout");
+  return { ok: "Nova tentativa de prova liberada. O aluno poderá iniciar a prova de novo." };
 }
 
 export async function desmatricularMateriaMatricula(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -285,7 +385,7 @@ export async function reiniciarMateriaMatricula(_prev: FormState, formData: Form
 
   revalidatePath(`/secretaria/alunos/${alunoId}`);
   revalidatePath("/meus-cursos", "layout");
-  return { ok: "Matéria reiniciada. O progresso foi zerado." };
+  return { ok: "Matéria reiniciada. As aulas deixaram de estar concluídas. As provas foram mantidas." };
 }
 
 export async function reiniciarMatricula(_prev: FormState, formData: FormData): Promise<FormState> {

@@ -5,6 +5,8 @@ import { capasDasMaterias } from "@/lib/materia-capa";
 import { createClient } from "@/lib/supabase/server";
 import { requireAluno } from "@/lib/session";
 import { um } from "@/lib/relacao";
+import { tentativaProvaPendente } from "@/actions/estudo";
+import { carregarPainelProva } from "@/lib/prova-painel";
 import { carregarTrilha, passosApenasVisualizacao } from "@/lib/trilha";
 
 export default async function MateriaAlunoPage({
@@ -45,6 +47,10 @@ export default async function MateriaAlunoPage({
   const consulta = `?matricula=${matriculaId}`;
   const passosBrutos = await carregarTrilha(supabase, materiaId, session.user.id, consulta);
   const passos = bloqueada ? passosApenasVisualizacao(passosBrutos) : passosBrutos;
+  const prova = await carregarPainelProva(supabase, session.user.id, materiaId, consulta, {
+    nova: await tentativaProvaPendente(session.user.id, materiaId),
+    bloqueada,
+  });
 
   return (
     <InicioMateriaAluno
@@ -55,6 +61,7 @@ export default async function MateriaAlunoPage({
       y={capa?.y}
       expiracao={mostrarValidade ? expiracao : null}
       passos={passos}
+      prova={prova}
     />
   );
 }

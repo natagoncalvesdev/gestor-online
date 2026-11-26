@@ -5,6 +5,8 @@ import { capasDasMaterias } from "@/lib/materia-capa";
 import { createClient } from "@/lib/supabase/server";
 import { requireAluno } from "@/lib/session";
 import { produtoAbertoDaMateria } from "@/lib/produto-aberto";
+import { tentativaProvaPendente } from "@/actions/estudo";
+import { carregarPainelProva } from "@/lib/prova-painel";
 import { carregarTrilha } from "@/lib/trilha";
 
 export default async function MateriaAbertaPage({ params }: { params: Promise<{ materiaId: string }> }) {
@@ -20,6 +22,10 @@ export default async function MateriaAbertaPage({ params }: { params: Promise<{ 
   const capas = await capasDasMaterias(leitura, [materiaId]);
   const capa = capas.get(materiaId);
   const passos = await carregarTrilha(supabase, materia.id, session.user.id, "");
+  const prova = await carregarPainelProva(supabase, session.user.id, materia.id, "", {
+    nova: await tentativaProvaPendente(session.user.id, materia.id),
+    bloqueada: false,
+  });
 
   return (
     <InicioMateriaAluno
@@ -30,6 +36,7 @@ export default async function MateriaAbertaPage({ params }: { params: Promise<{ 
       y={capa?.y}
       expiracao={null}
       passos={passos}
+      prova={prova}
     />
   );
 }

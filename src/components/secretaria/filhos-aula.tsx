@@ -36,7 +36,6 @@ export type QuestionarioFilho = {
   id: string;
   titulo: string;
   encerra: boolean;
-  notaMinima: string;
   posicao: number;
   questoes: QuestaoAdmin[];
 };
@@ -167,7 +166,6 @@ export function FilhosAula({
                   id={item.id}
                   titulo={item.titulo}
                   encerra={item.encerra}
-                  notaMinima={item.notaMinima}
                   questoes={item.questoes}
                 />
               )}

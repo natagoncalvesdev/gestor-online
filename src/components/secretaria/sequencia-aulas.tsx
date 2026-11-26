@@ -7,7 +7,6 @@ import { adicionarArquivoAula, clonarAula, criarQuestionario, excluirArquivoAula
 import { ActionForm } from "@/components/action-form";
 import { CartaoQuestionario, type QuestaoAdmin } from "@/components/secretaria/cartao-questionario";
 import { EditorApresentacao } from "@/components/secretaria/editor-apresentacao";
-import { FilhosAula, type QuestionarioFilho, type TopicoAdmin } from "@/components/secretaria/filhos-aula";
 import { SubmitButton } from "@/components/submit-button";
 import { Field, Input, Select } from "@/components/ui/field";
 
@@ -25,15 +24,12 @@ export type ItemSequencia =
       epubNome: string | null;
       epubPath: string | null;
       arquivos: ArquivoAula[];
-      topicos: TopicoAdmin[];
-      questionarios: QuestionarioFilho[];
     }
   | {
       tipo: "questionario";
       id: string;
       titulo: string;
       encerra: boolean;
-      notaMinima: string;
       questoes: QuestaoAdmin[];
     };
 
@@ -99,30 +95,39 @@ export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens:
               </ActionForm>
             </div>
           ) : item.tipo === "questionario" ? (
-            <details className="rounded-xl border bg-card">
-              <summary className="flex cursor-pointer items-center gap-2 px-3 py-3 text-sm font-medium">
-                <Alca arrastar={() => setArrastando(item.id)} soltarAlca={() => setArrastando(null)} nome={item.titulo} />
-                <span className="min-w-0 flex-1 truncate">Questionário · {item.titulo}</span>
-              </summary>
-              <div className="border-t px-4 py-4">
-                <CartaoQuestionario
-                  materiaId={materiaId}
-                  id={item.id}
-                  titulo={item.titulo}
-                  encerra={item.encerra}
-                  notaMinima={item.notaMinima}
-                  questoes={item.questoes}
-                />
+            <div className="rounded-xl border bg-card">
+              <div className="flex items-start">
+                <div className="pt-3 pl-2">
+                  <Alca arrastar={() => setArrastando(item.id)} soltarAlca={() => setArrastando(null)} nome={item.titulo} />
+                </div>
+                <details className="min-w-0 flex-1">
+                  <summary className="cursor-pointer px-2 py-3 pr-3 text-sm font-medium">
+                    <span className="min-w-0 truncate">Questionário · {item.titulo}</span>
+                  </summary>
+                  <div className="border-t px-4 py-4">
+                    <CartaoQuestionario
+                      materiaId={materiaId}
+                      id={item.id}
+                      titulo={item.titulo}
+                      encerra={item.encerra}
+                      questoes={item.questoes}
+                    />
+                  </div>
+                </details>
               </div>
-            </details>
+            </div>
           ) : (
-            <details className="rounded-xl border bg-card">
-              <summary className="flex cursor-pointer items-center gap-2 px-3 py-3 text-sm font-medium">
-                <Alca arrastar={() => setArrastando(item.id)} soltarAlca={() => setArrastando(null)} nome={item.titulo} />
-                <span className="min-w-0 flex-1 truncate">{item.titulo}</span>
-              </summary>
-              <div className="space-y-3 border-t px-4 py-4">
-                <ActionForm action={salvarAula} className="grid gap-3">
+            <div className="rounded-xl border bg-card">
+              <div className="flex items-start">
+                <div className="pt-3 pl-2">
+                  <Alca arrastar={() => setArrastando(item.id)} soltarAlca={() => setArrastando(null)} nome={item.titulo} />
+                </div>
+                <details className="min-w-0 flex-1">
+                  <summary className="cursor-pointer px-2 py-3 pr-3 text-sm font-medium">
+                    <span className="min-w-0 truncate">{item.titulo}</span>
+                  </summary>
+                  <div className="space-y-3 border-t px-4 py-4">
+                <ActionForm action={salvarAula} id={`salvar-aula-${item.id}`} className="grid gap-3">
                   <input type="hidden" name="id" value={item.id} />
                   <input type="hidden" name="materia_id" value={materiaId} />
                   <Field label="Título">
@@ -138,7 +143,6 @@ export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens:
                   <Field label={item.epubNome ? `Substituir livro (${item.epubNome})` : "Livro digital EPUB"}>
                     <Input name="epub" type="file" accept=".epub" />
                   </Field>
-                  <SubmitButton>Salvar aula</SubmitButton>
                 </ActionForm>
                 <div className="space-y-2">
                   <p className="text-sm font-medium">Arquivos</p>
@@ -175,22 +179,30 @@ export function SequenciaAulas({ materiaId, itens }: { materiaId: string; itens:
                     <SubmitButton size="sm">Adicionar</SubmitButton>
                   </ActionForm>
                 </div>
-                <FilhosAula materiaId={materiaId} aulaId={item.id} topicos={item.topicos} questionarios={item.questionarios} />
-                <div className="flex gap-2">
-                  <ActionForm action={clonarAula}>
-                    <input type="hidden" name="id" value={item.id} />
-                    <input type="hidden" name="materia_id" value={materiaId} />
-                    <SubmitButton variant="outline" size="sm" pendingLabel="Clonando...">Clonar</SubmitButton>
-                  </ActionForm>
+                <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
                   <ActionForm action={excluirAula}>
                     <input type="hidden" name="id" value={item.id} />
                     <input type="hidden" name="materia_id" value={materiaId} />
                     <input type="hidden" name="epub_path" value={item.epubPath ?? ""} />
-                    <SubmitButton variant="ghost" pendingLabel="Excluindo...">Excluir aula</SubmitButton>
+                    <SubmitButton variant="destructive" size="sm" pendingLabel="Excluindo...">
+                      Excluir
+                    </SubmitButton>
                   </ActionForm>
+                  <ActionForm action={clonarAula}>
+                    <input type="hidden" name="id" value={item.id} />
+                    <input type="hidden" name="materia_id" value={materiaId} />
+                    <SubmitButton variant="secondary" size="sm" pendingLabel="Clonando...">
+                      Clonar
+                    </SubmitButton>
+                  </ActionForm>
+                  <SubmitButton form={`salvar-aula-${item.id}`} size="sm">
+                    Salvar aula
+                  </SubmitButton>
                 </div>
               </div>
-            </details>
+                </details>
+              </div>
+            </div>
           )}
         </div>
       ))}

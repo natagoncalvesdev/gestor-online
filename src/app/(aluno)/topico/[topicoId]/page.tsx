@@ -41,12 +41,6 @@ export default async function TopicoPage({
   const { data: arquivos } = admin
     ? await admin.from("aula_arquivo").select("id, nome, mime, visualizar, baixar").eq("topico_id", topico.id).order("criado_em")
     : { data: [] };
-  const { data: progresso } = await supabase
-    .from("topico_progresso")
-    .select("video_concluido, ebook_cfi")
-    .eq("topico_id", topico.id)
-    .eq("aluno_id", acesso.session.user.id)
-    .maybeSingle();
   const passos = await carregarTrilha(supabase, aula.materia_id, acesso.session.user.id, acesso.consulta);
   const { anterior, seguinte } = vizinhos(passos, "topico", topico.id);
   const aulaFechada = Boolean(aula.libera_em && !licaoLiberada(aula.libera_em));
@@ -64,16 +58,7 @@ export default async function TopicoPage({
           voltar={acesso.voltar}
           anterior={anterior}
           seguinte={seguinte}
-          concluir={
-            bloqueada
-              ? undefined
-              : {
-                  topicoId: topico.id,
-                  matriculaId: acesso.matriculaId,
-                  materiaId: aula.materia_id,
-                  visto: Boolean(progresso?.video_concluido),
-                }
-          }
+          concluir={undefined}
         />
       }
     >
@@ -88,7 +73,7 @@ export default async function TopicoPage({
           arquivos={arquivos ?? []}
           epub={
             topico.epub_path
-              ? { url: `/api/ebook/topico/${topico.id}`, cfi: progresso?.ebook_cfi ?? null, campo: "topico_id", id: topico.id }
+              ? { url: `/api/ebook/topico/${topico.id}`, cfi: null, campo: "topico_id", id: topico.id }
               : null
           }
         />

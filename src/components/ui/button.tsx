@@ -6,6 +6,7 @@ const variants = {
   accent: "bg-accent text-accent-foreground hover:bg-accent/90",
   outline: "border bg-white hover:bg-secondary",
   ghost: "hover:bg-secondary",
+  secondary: "bg-zinc-600 text-white hover:bg-zinc-700",
   destructive: "bg-red-700 text-white hover:bg-red-800",
 };
 

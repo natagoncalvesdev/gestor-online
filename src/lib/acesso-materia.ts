@@ -41,6 +41,17 @@ export async function acessoMateria(materiaId: string, matriculaInformada?: stri
     : null;
   const materia = acesso ? um(acesso.materia as { nome: string } | { nome: string }[] | null) : materiaNome;
   const matriculaId = acesso ? (acesso.matricula_id as string) : null;
+  const { data: pendente } = acesso
+    ? await supabase
+        .from("tentativa_prova")
+        .select("id")
+        .eq("aluno_id", session.user.id)
+        .eq("materia_id", materiaId)
+        .is("nota", null)
+        .is("iniciada_em", null)
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
 
   return {
     session,
@@ -50,5 +61,6 @@ export async function acessoMateria(materiaId: string, matriculaInformada?: stri
     materiaNome: materia?.nome ?? "Matéria",
     voltar: matriculaId ? `/meus-cursos/${matriculaId}/${materiaId}` : `/meus-cursos/aberto/${materiaId}`,
     consulta: matriculaId ? `?matricula=${matriculaId}` : "",
+    provaNovaTentativa: Boolean(pendente),
   };
 }

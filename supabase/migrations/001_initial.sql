@@ -44,7 +44,7 @@ create table aluno (
 create table materia (
   id uuid primary key default gen_random_uuid(),
   nome text not null,
-  codigo text not null unique,
+  slug text not null unique,
   descricao text not null default '',
   carga_horaria integer not null default 0,
   nota_minima numeric(3,1) not null default 7 check (nota_minima >= 0 and nota_minima <= 10),

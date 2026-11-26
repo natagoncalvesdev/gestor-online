@@ -1,6 +1,8 @@
 import { CapaProduto } from "@/components/loja/capa-produto";
 import { ItensTrilha } from "@/components/estudo/itens-trilha";
+import { PainelProvaAluno } from "@/components/estudo/painel-prova-aluno";
 import { formatDate } from "@/lib/format";
+import type { PainelProvaMateria } from "@/lib/prova-painel";
 import type { PassoTrilha } from "@/lib/trilha";
 import { resumoProgresso } from "@/lib/trilha";
 
@@ -12,6 +14,7 @@ export function InicioMateriaAluno({
   y = 0,
   expiracao,
   passos,
+  prova,
 }: {
   nome: string;
   capa: string | null;
@@ -20,6 +23,7 @@ export function InicioMateriaAluno({
   y?: number;
   expiracao: string | null;
   passos: PassoTrilha[];
+  prova?: PainelProvaMateria | null;
 }) {
   const { feitas, total, percentual } = resumoProgresso(passos);
 
@@ -53,6 +57,7 @@ export function InicioMateriaAluno({
         <h2 className="px-4 pt-4 font-medium">Aulas e conteúdo</h2>
         <ItensTrilha passos={passos} />
       </section>
+      {prova ? <PainelProvaAluno painel={prova} /> : null}
     </div>
   );
 }

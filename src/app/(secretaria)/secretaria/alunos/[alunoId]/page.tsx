@@ -9,6 +9,7 @@ import {
 } from "@/actions/alunos";
 import { ActionForm } from "@/components/action-form";
 import { CpfInput } from "@/components/cpf-input";
+import type { TentativaProvaInfo } from "@/components/estudo/nota-tentativas";
 import { CursosAluno, type LinhaCursoAluno } from "@/components/secretaria/cursos-aluno";
 import { EnderecoAlunoAbas } from "@/components/secretaria/endereco-aluno-abas";
 import { SubmitButton } from "@/components/submit-button";
@@ -43,12 +44,12 @@ export default async function AlunoDetalhePage({
   if (!alunoBruto) notFound();
   const aluno = mesclarAlunoEndereco(alunoBruto);
 
-  const [{ data: matriculas }, { data: documentos }, { data: produtosAtivos }, { data: observacoes }, { data: pedidos }, { data: aulas }, { data: topicos }, { data: questionarios }, { data: progresso }, { data: progressoTopico }, { data: tentativas }] =
+  const [{ data: matriculas }, { data: documentos }, { data: produtosAtivos }, { data: observacoes }, { data: pedidos }, { data: aulas }, { data: questionarios }, { data: progresso }, { data: tentativas }] =
     await Promise.all([
       supabase
         .from("matricula")
         .select(
-          "id, status, data_criacao, produto_id, produto:produto_id(nome, data_criacao, agrupador, gratuita), materias:matricula_materia(id, ordem, status, materia_id, liberada_em, data_expiracao, conclusao_manual, materia:materia_id(nome, codigo, ordem))",
+          "id, status, data_criacao, produto_id, produto:produto_id(nome, data_criacao, agrupador, gratuita), materias:matricula_materia(id, ordem, status, materia_id, liberada_em, data_expiracao, conclusao_manual, materia:materia_id(nome, slug, ordem))",
         )
         .eq("aluno_id", alunoId),
       supabase
@@ -58,7 +59,7 @@ export default async function AlunoDetalhePage({
         .order("data_emissao", { ascending: false }),
       supabase
         .from("produto")
-        .select("id, nome, agrupador, gratuita, vinculos:produto_materia(ordem, materia:materia_id(id, nome, codigo))")
+        .select("id, nome, agrupador, gratuita, vinculos:produto_materia(ordem, materia:materia_id(id, nome, slug))")
         .eq("ativo", true)
         .order("nome"),
       supabase
@@ -73,13 +74,11 @@ export default async function AlunoDetalhePage({
         .eq("aluno_id", alunoId)
         .order("data_criacao", { ascending: false }),
       supabase.from("aula").select("id, materia_id"),
-      supabase.from("topico").select("id, aula:aula_id(materia_id)"),
       supabase.from("questionario").select("id, materia_id"),
       supabase.from("aula_progresso").select("aula_id, video_concluido").eq("aluno_id", alunoId),
-      supabase.from("topico_progresso").select("topico_id, video_concluido").eq("aluno_id", alunoId),
       supabase
         .from("tentativa_prova")
-        .select("matricula_id, materia_id, questionario_id, aprovado, nota, data_criacao")
+        .select("id, matricula_id, materia_id, questionario_id, aprovado, nota, acertos, total, data_criacao, entregue_em, codigo, iniciada_em")
         .eq("aluno_id", alunoId)
         .order("data_criacao", { ascending: false }),
     ]);
@@ -90,14 +89,6 @@ export default async function AlunoDetalhePage({
     listaAulas.push(aula.id);
     aulasPorMateria.set(aula.materia_id, listaAulas);
   }
-  const topicosPorMateria = new Map<string, string[]>();
-  for (const topico of topicos ?? []) {
-    const aula = um(topico.aula as { materia_id: string } | { materia_id: string }[] | null);
-    if (!aula) continue;
-    const listaTopicos = topicosPorMateria.get(aula.materia_id) ?? [];
-    listaTopicos.push(topico.id);
-    topicosPorMateria.set(aula.materia_id, listaTopicos);
-  }
   const quizzesPorMateria = new Map<string, string[]>();
   for (const questionario of questionarios ?? []) {
     const listaQuizzes = quizzesPorMateria.get(questionario.materia_id) ?? [];
@@ -105,10 +96,39 @@ export default async function AlunoDetalhePage({
     quizzesPorMateria.set(questionario.materia_id, listaQuizzes);
   }
   const vistas = new Set((progresso ?? []).filter((item) => item.video_concluido).map((item) => item.aula_id));
-  const topicosVistos = new Set((progressoTopico ?? []).filter((item) => item.video_concluido).map((item) => item.topico_id));
-  const quizzesAprovados = new Set(
-    (tentativas ?? []).filter((item) => item.aprovado && item.questionario_id).map((item) => item.questionario_id as string)
-  );
+  const materiaDoQuestionario = new Map<string, string>();
+  for (const questionario of questionarios ?? []) {
+    materiaDoQuestionario.set(questionario.id as string, questionario.materia_id as string);
+  }
+  const tentativasPorMateria = new Map<string, TentativaProvaInfo[]>();
+  const tentativasPorChave = new Map<string, TentativaProvaInfo[]>();
+  const tentativaPendentePorChave = new Set<string>();
+  for (const item of tentativas ?? []) {
+    const chave = `${item.matricula_id}:${item.materia_id}`;
+    if (item.nota == null && !item.entregue_em) {
+      tentativaPendentePorChave.add(chave);
+      continue;
+    }
+    const info: TentativaProvaInfo = {
+      id: item.id as string,
+      href: `/secretaria/alunos/${alunoId}/prova/${item.id}`,
+      codigo: (item.codigo as string | null) ?? null,
+      nota: Number(item.nota ?? 0),
+      acertos: Number(item.acertos ?? 0),
+      total: Number(item.total ?? 0),
+      aprovado: Boolean(item.aprovado),
+      entregueEm: (item.entregue_em as string | null) ?? (item.data_criacao as string | null),
+    };
+    const materiaId = (item.materia_id as string | null) ?? materiaDoQuestionario.get(item.questionario_id as string);
+    if (materiaId) {
+      const listaMateria = tentativasPorMateria.get(materiaId) ?? [];
+      listaMateria.push(info);
+      tentativasPorMateria.set(materiaId, listaMateria);
+    }
+    const listaChave = tentativasPorChave.get(chave) ?? [];
+    listaChave.push(info);
+    tentativasPorChave.set(chave, listaChave);
+  }
   const telefone = String(aluno.telefone ?? "");
   const digitos = telefone.replace(/\D/g, "");
   const whatsapp = digitos ? `https://wa.me/55${digitos}` : null;
@@ -136,7 +156,7 @@ export default async function AlunoDetalhePage({
     vinculos:
       | {
           ordem: number;
-          materia: { id: string; nome: string; codigo: string } | { id: string; nome: string; codigo: string }[] | null;
+          materia: { id: string; nome: string; slug: string } | { id: string; nome: string; slug: string }[] | null;
         }[]
       | null;
   };
@@ -179,13 +199,27 @@ export default async function AlunoDetalhePage({
     (a, b) => a.materiaNome.localeCompare(b.materiaNome, "pt-BR") || a.produtoNome.localeCompare(b.produtoNome, "pt-BR"),
   );
 
-  const sequenciasDisponiveis = produtos
-    .filter((produto) => produto.agrupador && !produtosJaMatriculados.has(produto.id) && temMaterias(produto))
-    .map((produto) => ({ id: produto.id, nome: produto.nome }));
+  let sequenciaAtiva: { matriculaId: string; nome: string } | null = null;
+  for (const matricula of matriculas ?? []) {
+    if (matricula.status !== "ativa") continue;
+    const produto = um(
+      matricula.produto as { nome: string; agrupador: boolean } | { nome: string; agrupador: boolean }[] | null,
+    );
+    if (!produto?.agrupador) continue;
+    sequenciaAtiva = { matriculaId: matricula.id as string, nome: produto.nome };
+    break;
+  }
+
+  const sequenciasDisponiveis = sequenciaAtiva
+    ? []
+    : produtos
+        .filter((produto) => produto.agrupador && !produtosJaMatriculados.has(produto.id) && temMaterias(produto))
+        .map((produto) => ({ id: produto.id, nome: produto.nome }));
 
   const notaProvaPorMatriculaMateria = new Map<string, string>();
   const aprovacaoProvaPorMatriculaMateria = new Map<string, boolean>();
   for (const tentativa of tentativas ?? []) {
+    if (tentativa.nota == null && !tentativa.entregue_em) continue;
     const matriculaId = tentativa.matricula_id as string;
     const questionarioId = tentativa.questionario_id as string | null;
     const materiaIdTentativa = tentativa.materia_id as string;
@@ -228,7 +262,7 @@ export default async function AlunoDetalhePage({
         liberada_em: string | null;
         data_expiracao: string | null;
         conclusao_manual: boolean;
-        materia: { nome: string; codigo: string; ordem: number } | { nome: string; codigo: string; ordem: number }[] | null;
+        materia: { nome: string; slug: string; ordem: number } | { nome: string; slug: string; ordem: number }[] | null;
       }[],
     );
 
@@ -238,18 +272,26 @@ export default async function AlunoDetalhePage({
       const gratuita = materiasGratuitas.has(materiaId) || Boolean(produto?.gratuita);
       const ordemMateria = Number(materia?.ordem ?? 0);
       const ids = aulasPorMateria.get(materiaId) ?? [];
-      const idsTopico = topicosPorMateria.get(materiaId) ?? [];
-      const idsQuiz = quizzesPorMateria.get(materiaId) ?? [];
-      const total = ids.length + idsTopico.length + idsQuiz.length;
+      const chaveProva = `${matricula.id}:${materiaId}`;
+      const tentativasProva =
+        (tentativasPorMateria.get(materiaId)?.length
+          ? tentativasPorMateria.get(materiaId)
+          : tentativasPorChave.get(chaveProva)) ?? [];
+      const pendente = tentativaPendentePorChave.has(chaveProva) ? 1 : 0;
+      const total = ids.length + tentativasProva.length + pendente;
       const statusMateria = vinculo.status as LinhaCursoAluno["statusMateria"];
       const conclusaoManual = Boolean(vinculo.conclusao_manual);
-      let feitas =
-        ids.filter((id) => vistas.has(id)).length +
-        idsTopico.filter((id) => topicosVistos.has(id)).length +
-        idsQuiz.filter((id) => quizzesAprovados.has(id)).length;
-      if (statusMateria === "concluida") feitas = total;
-      const chaveProva = `${matricula.id}:${materiaId}`;
+      let feitas = ids.filter((id) => vistas.has(id)).length + tentativasProva.length;
+      if (statusMateria === "concluida" && pendente === 0) feitas = total;
       const mostrarNotaProva = !conclusaoManual;
+      const ultimaTentativa = tentativasProva[0];
+      const notaTexto =
+        notaProvaPorMatriculaMateria.get(chaveProva) ??
+        (ultimaTentativa
+          ? ultimaTentativa.nota.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+          : undefined);
+      const aprovada =
+        aprovacaoProvaPorMatriculaMateria.get(chaveProva) ?? ultimaTentativa?.aprovado;
 
       linhasMaterias.push({
         id: vinculo.id,
@@ -267,17 +309,18 @@ export default async function AlunoDetalhePage({
             ? null
             : ((vinculo.liberada_em as string | null) ?? (matricula.data_criacao as string)),
         dataPublicacao: (produto?.data_criacao ?? matricula.data_criacao) as string,
-        prova: mostrarNotaProva ? notaProvaPorMatriculaMateria.get(chaveProva) ?? "—" : "—",
+        prova: mostrarNotaProva ? notaTexto ?? "—" : "—",
         resultadoProva:
-          mostrarNotaProva && aprovacaoProvaPorMatriculaMateria.has(chaveProva)
-            ? aprovacaoProvaPorMatriculaMateria.get(chaveProva)
-              ? "aprovado"
-              : "reprovado"
-            : null,
+          mostrarNotaProva && aprovada != null ? (aprovada ? "aprovado" : "reprovado") : null,
         expiracao: vinculo.data_expiracao,
         mostrarAcoesProduto: indice === 0,
         gratuita,
         ordemMateria,
+        emAndamento:
+          statusMateria === "liberada" &&
+          (ids.some((id) => vistas.has(id)) || tentativasProva.length > 0),
+        tentativasProva,
+        provaNovaTentativa: tentativaPendentePorChave.has(chaveProva),
       });
     });
   }
@@ -302,8 +345,8 @@ export default async function AlunoDetalhePage({
     const linhas = linhasMaterias.filter(
       (linha) => linha.matriculaId === matricula.id && linha.statusMateria !== "desmatriculada",
     );
-    const feitas = linhas.reduce((soma, linha) => soma + linha.feitas, 0);
-    const total = linhas.reduce((soma, linha) => soma + linha.total, 0);
+    const feitas = linhas.filter((linha) => linha.statusMateria === "concluida").length;
+    const total = linhas.length;
     sequenciasMatriculadas.push({
       matriculaId: matricula.id as string,
       produtoId: matricula.produto_id as string,
@@ -453,6 +496,7 @@ export default async function AlunoDetalhePage({
         cursos={linhasMaterias}
         materiasDisponiveis={materiasDisponiveis}
         sequenciasDisponiveis={sequenciasDisponiveis}
+        sequenciaAtiva={sequenciaAtiva}
         sequenciasMatriculadas={sequenciasMatriculadas}
         podeEditarMatricula={session.user.papel === "admin"}
       />
